@@ -2,11 +2,27 @@
 
 ## What this is
 
-A minimal cross-platform game engine skeleton, extracted from
+**hopsan**: a 2D precision platformer (Celeste-like) on a cross-platform
+engine skeleton extracted from
 [ikimaa](https://github.com/supermuumi/ikimaa). The host owns the window,
-input, dev console, asset cache, renderer, and a hot-reloadable game DLL.
-The game DLL (`game.cpp`) is a 50-line stub that draws "hello world".
-Drop your own game in `game.cpp`; everything else is reusable plumbing.
+input (keyboard, mouse, gamepad), dev console, asset cache, renderer, and a
+hot-reloadable game DLL. The game DLL is `game.cpp`, which is a unity build
+of `src/game/*`.
+
+## Game design (decided so far)
+
+- 16px tiles, 640x360 virtual screen, integer-scaled + letterboxed.
+- World = rooms (tile rects) placed on one shared sparse tile grid. Camera
+  is clamped to the current room; leaving through an edge into another
+  room triggers a short camera pan. Edges with no neighbour room are walls;
+  falling out of the bottom kills you.
+- Respawn: room entry point (moved to the first safe landing if you entered
+  mid-air), overridden by touching a checkpoint. `respawn_mode checkpoint`
+  switches to last-checkpoint-only. Room entities reset on death / entry.
+- Moveset: run, variable jump, coyote + buffer, wall slide / jump, 8-way
+  dash (1 charge, refills on ground / crystal / spring), climb with stamina.
+  No attacks yet (deliberately).
+- Level editor is in-game (Tab). Save file: `assets/levels/world.txt`.
 
 ## Target platforms
 
@@ -17,7 +33,18 @@ it's free.
 ## Layout
 
 - `main.cpp` — host: window, input, frame loop, ImGui, hot reload, draw.
-- `game.cpp` — game DLL. Exports `game_init`, `game_tick`, `game_render`.
+- `game.cpp` — game DLL. Exports `game_init`, `game_tick`, `game_render`;
+  `#include`s the modules below (unity build, one TU).
+- `src/game/game.h` — all game types; `GameState` is the whole arena.
+  POD only, no pointers, so it survives hot reload. Bump `kStateVersion`
+  when changing its layout.
+- `src/game/world.cpp` — chunked tile grid, rooms, save / load.
+- `src/game/draw.cpp` — view transform, `Quad2D` / text output,
+  procedural tile art.
+- `src/game/play.cpp` — fixed-60Hz sim: player physics + tuning constants,
+  entities, hazards, room transitions, respawn, camera, play renderer.
+- `src/game/editor.cpp` — level editor (tile + room modes, undo / redo).
+- `assets/levels/world.txt` — the world (one ASCII block per room).
 - `src/shared/engine_api.h` — host ↔ DLL ABI. POD only.
 - `src/engine/` — engine modules compiled into the host:
   - `log` / `console` — dev console + file log.

@@ -1,10 +1,10 @@
-# Engine skeleton
+# hopsan
 
-Cross-platform game engine skeleton extracted from
-[ikimaa](https://github.com/supermuumi/ikimaa). Provides the window, input,
-dev console, asset cache, renderer (SDL_GPU + ImGui), native HUD renderer,
-and a hot-reloadable game DLL. The game itself is a 50-line `game.cpp`
-stub that draws "hello world".
+A 2D precision platformer in the spirit of Celeste / Hollow Knight, built on
+a small SDL3 engine skeleton extracted from
+[ikimaa](https://github.com/supermuumi/ikimaa). The world is a set of
+linked rooms you can traverse freely, and there's a built-in level editor
+(press **Tab**).
 
 ## Quick start
 
@@ -30,23 +30,73 @@ build\win\engine.exe
 SDL3 headers + import lib are expected under `ext/sdl3` (or set
 `SDL3_DIR` to wherever you put SDL3-devel-VC).
 
-## What you get
+## Controls
 
-- SDL3 + SDL_GPU host with a Vulkan / Metal renderer
-- Hot-reloadable game DLL — recompile `game.cpp` and the host picks
-  it up live, preserving game state across reloads
-- Dev console (F1 to toggle)
-- Native HUD renderer: world-space bars, screen-space panels, screen-space text
-- ImGui (with SDL3 + SDL_GPU backends, multi-viewport + docking enabled)
-- Asset cache for textures and glTF meshes
-- Fullscreen toggle (Alt+Enter / Cmd+Ctrl+F)
-- Shader pipeline: GLSL → SPIR-V (Vulkan) and Metal source (macOS)
-- Shadow mapping, directional sunlight, instanced tile / cube / mesh draws
+| Action | Keyboard | Gamepad |
+| --- | --- | --- |
+| Move | WASD / arrows | left stick / d-pad |
+| Jump | Space / C / K | A (south) / Y |
+| Dash (8 directions) | X / J / Left Shift | X / B |
+| Grab / climb | Z / L / Right Shift | LB / RB / triggers |
+| Drop through platform | Down + Jump | |
+| Level editor | Tab | |
+| Dev console | F1 | |
 
-## Where to add things
+Movement: variable-height jumps, coyote time, jump buffering, wall slide,
+wall jump, an air dash that refills on landing, and wall climbing with
+stamina (you flash white when it's about to run out).
 
-- Per-frame logic and rendering: `game.cpp`
-- New host services: extend `EnginePlatform` in `src/shared/engine_api.h`
-  and wire them up in `main.cpp`
-- New shaders: add `.glsl` / `.metal` pairs under `assets/shaders/`,
-  rebuild with `./build.sh shaders`
+## The world
+
+- The world is made of **rooms**: rectangles of 16px tiles placed on one
+  shared grid. The camera stays inside the current room and pans to the
+  next room when you walk, jump or fall out through an edge into it.
+  Room edges with no neighbouring room act as walls. Falling out of the
+  bottom kills you.
+- **Death**: by default you respawn where you entered the room. If you
+  entered mid-air, that point moves to the first safe ground you land on.
+  Touching a checkpoint flag overrides it until you leave the room.
+  Crumble blocks, crystals and enemies reset. Run `respawn_mode checkpoint`
+  in the console (F1) for Hollow Knight-style respawning at the last
+  checkpoint only, and `respawn_mode room` to switch back.
+- The world lives in `assets/levels/world.txt`, a readable text format with
+  one block of ASCII rows per room, so it diffs nicely in git.
+
+Tiles: rock, brick, backdrop (decorative), one-way platform, spikes (lethal
+when you move into them), crumble block, spring, dash crystal, checkpoint,
+walker enemy, and the start marker.
+
+## Level editor (Tab)
+
+| | |
+| --- | --- |
+| Pan | WASD / arrows (Shift = faster), middle-mouse drag |
+| Zoom | mouse wheel (zooms around the cursor) |
+| Paint / erase | left / right mouse |
+| Fill / erase rectangle | Shift + drag |
+| Pick tile under cursor | Alt + click |
+| Choose brush | 1-9, 0, Q / E, or click the palette |
+| Spike direction | T (auto-orients against walls by default) |
+| Room mode | R. Drag on empty space to create a room, drag inside a room to move it (tiles come with it), drag an edge or corner to resize, Del / X to delete |
+| New one-screen room at cursor | N |
+| Frame room / whole world | F |
+| Play from the cursor | P |
+| Undo / redo | Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) |
+| Save | Ctrl+S |
+| Grid / help | G / H |
+
+On macOS, Cmd works in place of Ctrl. You can only paint inside rooms,
+because tiles outside rooms aren't saved. Console commands: `save`,
+`load`, `restart`, `edit`, `respawn_mode`, and `room_name <name>` (renames
+the room under the cursor).
+
+## Engine notes
+
+- Hot-reloadable game DLL: run `./build.sh game` while the game is running
+  and it reloads in place. Game state survives as long as the `GameState`
+  layout is unchanged (`kStateVersion` in `src/game/game.h`).
+- The game renders 2D by emitting screen-space `Quad2D` rects plus
+  `HudText` through `RenderCommands` (see `src/shared/engine_api.h`). All
+  art is procedural placeholder for now.
+- The virtual screen is 640x360, scaled by an integer factor and
+  letterboxed for crisp pixels.

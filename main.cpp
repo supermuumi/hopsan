@@ -99,13 +99,13 @@ void cmd_reload_game(int, const char**, void*) {
 } // namespace
 
 int main(int /*argc*/, char** /*argv*/) {
-    if (!SDL_Init(SDL_INIT_VIDEO)) { std::fprintf(stderr, "SDL_Init: %s\n", SDL_GetError()); return 1; }
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) { std::fprintf(stderr, "SDL_Init: %s\n", SDL_GetError()); return 1; }
     anchor_to_basepath();
 
     engine::log_init("engine.log");
     LOG_INFO(kHostTag, "engine starting");
 
-    SDL_Window* window = SDL_CreateWindow("skeleton", 1280, 720, SDL_WINDOW_RESIZABLE);
+    SDL_Window* window = SDL_CreateWindow("hopsan", 1280, 720, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!window) { LOG_ERROR(kHostTag, "SDL_CreateWindow: %s", SDL_GetError()); return 1; }
 
     SDL_GPUDevice* gpu = SDL_CreateGPUDevice(
@@ -150,6 +150,8 @@ int main(int /*argc*/, char** /*argv*/) {
     const engine::UiFontSpec ui_fonts[] = {
         { "assets/fonts/ProggyClean.ttf",        13.0f },
         { "assets/fonts/NovaRound-Regular.ttf",  22.0f },
+        { "assets/fonts/ProggyClean.ttf",        26.0f },
+        { "assets/fonts/NovaRound-Regular.ttf",  44.0f },
     };
     engine::UiRenderer* ui = engine::ui_renderer_create(
         gpu, swap_fmt, ui_fonts, (int)(sizeof(ui_fonts)/sizeof(ui_fonts[0])),
@@ -190,6 +192,7 @@ int main(int /*argc*/, char** /*argv*/) {
 
     FrameInput input{};
     uint64_t prev_ticks = SDL_GetTicksNS();
+    SDL_Gamepad* pad = nullptr;
 
     while (!host.want_quit) {
         const uint64_t now_ticks = SDL_GetTicksNS();
@@ -199,14 +202,18 @@ int main(int /*argc*/, char** /*argv*/) {
 
         std::memset(input.keys_pressed,  0, sizeof(input.keys_pressed));
         std::memset(input.mouse_pressed, 0, sizeof(input.mouse_pressed));
+        std::memset(input.pad_pressed,   0, sizeof(input.pad_pressed));
         input.mouse_wheel_y = 0.0f;
         input.quit_requested = false;
 
         SDL_GetWindowSizeInPixels(window, &input.window_w, &input.window_h);
+        // Mouse comes back in window points; scale to pixels so it matches
+        // window_w / window_h on hi-dpi (Retina) displays.
         float mx = 0, my = 0;
         SDL_GetMouseState(&mx, &my);
-        input.mouse_x = mx;
-        input.mouse_y = my;
+        const float density = SDL_GetWindowPixelDensity(window);
+        input.mouse_x = mx * (density > 0.0f ? density : 1.0f);
+        input.mouse_y = my * (density > 0.0f ? density : 1.0f);
 
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
@@ -264,7 +271,42 @@ int main(int /*argc*/, char** /*argv*/) {
                 case SDL_EVENT_MOUSE_WHEEL:
                     input.mouse_wheel_y += ev.wheel.y;
                     break;
+                case SDL_EVENT_GAMEPAD_ADDED:
+                    if (!pad) {
+                        pad = SDL_OpenGamepad(ev.gdevice.which);
+                        if (pad) LOG_INFO(kHostTag, "gamepad: %s", SDL_GetGamepadName(pad));
+                    }
+                    break;
+                case SDL_EVENT_GAMEPAD_REMOVED:
+                    if (pad && SDL_GetGamepadID(pad) == ev.gdevice.which) {
+                        SDL_CloseGamepad(pad);
+                        pad = nullptr;
+                        std::memset(input.pad_held, 0, sizeof(input.pad_held));
+                        LOG_INFO(kHostTag, "gamepad removed");
+                    }
+                    break;
+                case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
+                    int b = (int)ev.gbutton.button;
+                    if (pad && ev.gbutton.which == SDL_GetGamepadID(pad) && b >= 0 && b < 32) {
+                        if (!input.pad_held[b]) input.pad_pressed[b] = true;
+                        input.pad_held[b] = true;
+                    }
+                    break;
+                }
+                case SDL_EVENT_GAMEPAD_BUTTON_UP: {
+                    int b = (int)ev.gbutton.button;
+                    if (pad && ev.gbutton.which == SDL_GetGamepadID(pad) && b >= 0 && b < 32)
+                        input.pad_held[b] = false;
+                    break;
+                }
             }
+        }
+
+        input.pad_connected = (pad != nullptr);
+        for (int a = 0; a < 6; ++a) {
+            input.pad_axes[a] = pad
+                ? (float)SDL_GetGamepadAxis(pad, (SDL_GamepadAxis)a) / 32767.0f
+                : 0.0f;
         }
 
         if (engine::game_loader_poll(&loader)) {
@@ -385,6 +427,7 @@ int main(int /*argc*/, char** /*argv*/) {
     engine::renderer_shutdown(&renderer);
     engine::asset_cache_shutdown(&assets);
     engine::game_loader_shutdown(&loader);
+    if (pad) SDL_CloseGamepad(pad);
     engine::console_destroy(console);
     std::free(game_memory);
 

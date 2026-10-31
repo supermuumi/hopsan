@@ -1,70 +1,175 @@
-// Game DLL stub. The host loads this as game.dll / libgame.dylib /
-// libgame.so and calls game_init once, then game_tick + game_render
-// every frame. The host hot-reloads the DLL when its mtime changes,
-// so editing this file + ./build.sh game reloads in-place.
+// hopsan -- a 2D precision platformer. This is the game DLL: the host
+// loads it as game.dll / libgame.dylib / libgame.so, calls game_init once
+// (and again after every hot reload), then game_tick + game_render each
+// frame.
+//
+// The game is a unity build of the modules under src/game/:
+//   game.h     -- every type + the GameState arena layout
+//   world.cpp  -- chunked tile grid, rooms, save / load
+//   draw.cpp   -- 2D view transform, quads, text, placeholder tile art
+//   play.cpp   -- player physics, rooms, entities, hazards, camera
+//   editor.cpp -- the level editor (Tab)
 
-#include "shared/engine_api.h"
+#include "game/game.h"
 
-#include <cstdio>
-#include <cstring>
+#include "game/world.cpp"
+#include "game/draw.cpp"
+#include "game/play.cpp"
+#include "game/editor.cpp"
 
-namespace {
+namespace hop {
 
-constexpr const char* kTag = "game";
+GameState* state_of(void* memory) { return static_cast<GameState*>(memory); }
 
-struct GameState {
-    EnginePlatform* platform;
-    uint64_t        frame;
-    float           uptime;
-};
-
-void cmd_hello(int /*argc*/, const char** /*argv*/, void* user) {
-    auto* s = static_cast<GameState*>(user);
-    if (!s || !s->platform) return;
-    s->platform->log(LOG_LEVEL_INFO, kTag, "hello from the game DLL");
+void cmd_save(int, const char**, void* user) {
+    GameState* s = state_of(user);
+    if (world_save(s->world, kWorldPath)) s->ed.dirty = false;
 }
 
-} // namespace
+void cmd_load(int, const char**, void* user) {
+    GameState* s = state_of(user);
+    if (!world_load(s->world, kWorldPath)) return;
+    undo_clear(s->ed);
+    s->ed.dirty = false;
+    play_start(*s);
+}
+
+void cmd_restart(int, const char**, void* user) {
+    GameState* s = state_of(user);
+    s->play.deaths = 0;
+    s->play.time = 0;
+    play_start(*s);
+    s->mode = MODE_PLAY;
+}
+
+void cmd_respawn_mode(int argc, const char** argv, void* user) {
+    GameState* s = state_of(user);
+    if (argc >= 2) {
+        if (std::strcmp(argv[1], "room") == 0) s->play.respawn_mode = RESPAWN_ROOM_ENTRY;
+        else if (std::strcmp(argv[1], "checkpoint") == 0) s->play.respawn_mode = RESPAWN_CHECKPOINT;
+        else { logf(LOG_LEVEL_WARN, "usage: respawn_mode [room|checkpoint]"); return; }
+    }
+    logf(LOG_LEVEL_INFO, "respawn_mode = %s",
+         s->play.respawn_mode == RESPAWN_ROOM_ENTRY ? "room (room entry or checkpoint)" : "checkpoint (last checkpoint only)");
+}
+
+void cmd_room_name(int argc, const char** argv, void* user) {
+    GameState* s = state_of(user);
+    int ri = -1;
+    if (s->mode == MODE_EDIT) {
+        int tx, ty;
+        mouse_tile(*s, &tx, &ty);
+        ri = room_at_tile(s->world, tx, ty);
+    } else {
+        ri = s->play.room;
+    }
+    if (ri < 0) { logf(LOG_LEVEL_WARN, "no room under the cursor / player"); return; }
+    if (argc < 2) { logf(LOG_LEVEL_INFO, "room %d is '%s'", ri, s->world.rooms[ri].name); return; }
+    Room r = s->world.rooms[ri];
+    std::snprintf(r.name, sizeof(r.name), "%s", argv[1]);
+    undo_begin(s->ed);
+    ed_set_room(*s, ri, r);
+    undo_end(s->ed);
+    logf(LOG_LEVEL_INFO, "renamed room %d to '%s'", ri, r.name);
+}
+
+void cmd_edit(int, const char**, void* user) {
+    GameState* s = state_of(user);
+    if (s->mode == MODE_EDIT) editor_exit(*s, false); else editor_enter(*s);
+}
+
+void register_commands(EnginePlatform* platform) {
+    platform->console_register("save", cmd_save, "save the world to assets/levels/world.txt");
+    platform->console_register("load", cmd_load, "reload the world from disk (drops unsaved edits)");
+    platform->console_register("restart", cmd_restart, "start a new run from the start tile");
+    platform->console_register("respawn_mode", cmd_respawn_mode, "respawn_mode [room|checkpoint]");
+    platform->console_register("room_name", cmd_room_name, "room_name <name> -- rename room under cursor / player");
+    platform->console_register("edit", cmd_edit, "toggle the level editor (same as Tab)");
+}
+
+} // namespace hop
+
+using namespace hop;
 
 GAME_EXPORT void game_init(void* memory, size_t size, EnginePlatform* platform) {
     if (size < sizeof(GameState)) {
         if (platform) platform->log(LOG_LEVEL_ERROR, kTag, "game arena too small");
         return;
     }
-    auto* s = static_cast<GameState*>(memory);
-    std::memset(s, 0, sizeof(*s));
-    s->platform = platform;
-
-    if (platform) {
-        platform->console_register("hello", cmd_hello, "log a greeting");
-        platform->log(LOG_LEVEL_INFO, kTag, "game initialised");
+    GameState* s = state_of(memory);
+    g_state = s;
+    const bool keep = s->magic == kStateMagic && s->version == kStateVersion
+                   && s->size == (uint64_t)sizeof(GameState);
+    if (!keep) {
+        std::memset(s, 0, sizeof(*s));
+        s->magic = kStateMagic;
+        s->version = kStateVersion;
+        s->size = sizeof(GameState);
     }
+    s->platform = platform;
+    if (platform) register_commands(platform);
+
+    if (keep) {
+        logf(LOG_LEVEL_INFO, "game reloaded -- state kept");
+        return;
+    }
+    if (!world_load(s->world, kWorldPath)) {
+        logf(LOG_LEVEL_WARN, "starting with an empty default world");
+        world_make_default(s->world);
+    }
+    s->play.rng = 0x1234567u;
+    s->play.respawn_mode = RESPAWN_ROOM_ENTRY;
+    s->ed.grid = true;
+    s->ed.help = true;
+    s->mode = MODE_PLAY;
+    play_start(*s);
+    logf(LOG_LEVEL_INFO, "game initialised (%zu KB state)", sizeof(GameState) / 1024);
 }
 
 GAME_EXPORT void game_tick(void* memory, const FrameInput* input) {
-    auto* s = static_cast<GameState*>(memory);
-    if (!s || !input) return;
-    s->frame   = input->frame;
-    s->uptime += input->dt;
+    GameState* s = state_of(memory);
+    if (!s || !input || s->magic != kStateMagic) return;
+    g_state = s;
+    s->in = *input;
+    s->frame = input->frame;
+    s->real_time += input->dt;
+    g_ui = input->window_h >= 1300 ? 2 : 1;
+
+    constexpr int SC_TAB_KEY = 43;
+    if (input->keys_pressed[SC_TAB_KEY]) {
+        if (s->mode == MODE_PLAY) editor_enter(*s);
+        else editor_exit(*s, false);
+        return;
+    }
+
+    if (s->mode == MODE_PLAY) {
+        gather_actions(*s, *input);
+        play_tick(*s, input->dt);
+    } else {
+        editor_tick(*s, input->dt);
+    }
 }
 
 GAME_EXPORT void game_render(void* memory, RenderCommands* out) {
-    auto* s = static_cast<GameState*>(memory);
-    if (!s || !out) return;
+    GameState* s = state_of(memory);
+    if (!s || !out || s->magic != kStateMagic) return;
+    g_state = s;
+    g_out = out;
+    g_ui = s->in.window_h >= 1300 ? 2 : 1;
+    s->quad_count = 0;
+    s->quad_overflow = false;
 
-    out->clear_color[0] = 0.08f;
-    out->clear_color[1] = 0.10f;
-    out->clear_color[2] = 0.14f;
+    out->clear_color[0] = 0.0f;
+    out->clear_color[1] = 0.0f;
+    out->clear_color[2] = 0.0f;
     out->clear_color[3] = 1.0f;
 
-    // One screen-space text label, font 1 (Nova Round), white.
-    if (out->hud_text_count < kMaxHudTexts) {
-        HudText& t = out->hud_texts[out->hud_text_count++];
-        t.x = 24.0f;
-        t.y = 48.0f;
-        t.color = 0xFFFFFFFFu;
-        std::snprintf(t.text, sizeof(t.text),
-                      "hello world  frame=%llu  t=%.1fs",
-                      (unsigned long long)s->frame, (double)s->uptime);
+    if (s->in.window_w > 0 && s->in.window_h > 0) {
+        if (s->mode == MODE_PLAY) render_play(*s);
+        else render_editor(*s);
     }
+
+    out->quads = s->quads;
+    out->quad_count = s->quad_count;
+    g_out = nullptr;
 }

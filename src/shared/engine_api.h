@@ -60,6 +60,13 @@ struct FrameInput {
     float    mouse_wheel_y;       // accumulated this frame
     int      window_w;            // pixels
     int      window_h;
+
+    // First connected gamepad (SDL_GamepadButton / SDL_GamepadAxis order).
+    // Axes are normalised to -1..1 (triggers 0..1). All zero when no pad.
+    bool     pad_connected;
+    bool     pad_held[32];        // indexed by SDL_GamepadButton
+    bool     pad_pressed[32];     // edge-triggered
+    float    pad_axes[6];         // LX, LY, RX, RY, LT, RT
 };
 
 // Tile geometry shapes the renderer understands. A TileLayer is one
@@ -126,12 +133,29 @@ struct HudText {
     float    x;
     float    y;      // baseline (not top-left)
     uint32_t color;
-    char     text[64];
+    char     text[96];
+    int      font;   // index into the host's UI font list (0 = ProggyClean 13px)
+};
+
+// Screen-space solid rectangle in window pixels, drawn by the UI renderer
+// before HUD panels + text. (x0, y0) top-left, (x1, y1) bottom-right.
+// Used by 2D games that do their own world -> screen transform.
+struct Quad2D {
+    float    x0, y0, x1, y1;
+    uint32_t color;    // IM_COL32-packed ABGR (low byte R)
 };
 
 constexpr int kMaxHudBars   = 32;
-constexpr int kMaxHudPanels = 16;
-constexpr int kMaxHudTexts  = 32;
+constexpr int kMaxHudPanels = 64;
+constexpr int kMaxHudTexts  = 256;
+
+// Host UI font slots (see main.cpp). The game picks one per HudText.
+enum HudFont : int {
+    HUD_FONT_SMALL     = 0,  // ProggyClean 13px
+    HUD_FONT_TITLE     = 1,  // Nova Round 22px
+    HUD_FONT_SMALL_2X  = 2,  // ProggyClean 26px (hi-dpi)
+    HUD_FONT_TITLE_2X  = 3,  // Nova Round 44px (hi-dpi)
+};
 
 // What the game wants drawn this frame.
 struct RenderCommands {
@@ -166,6 +190,11 @@ struct RenderCommands {
 
     int       hud_text_count;
     HudText   hud_texts[kMaxHudTexts];
+
+    // Screen-space 2D quads. Points into game memory; must stay valid
+    // until the next game_tick. Drawn in order, before HUD panels/text.
+    const Quad2D* quads;
+    int           quad_count;
 };
 
 // ---- Game DLL exports ---------------------------------------------------

@@ -49,7 +49,15 @@ void hud_queue(const RenderCommands* cmds, UiRenderer* ui,
                int window_w, int window_h) {
     if (!cmds || !ui) return;
 
-    // Panels first, so text + bars layer over them.
+    // 2D game quads first: they're the "world" for 2D games.
+    if (cmds->quads) {
+        for (int i = 0; i < cmds->quad_count; ++i) {
+            const Quad2D& q = cmds->quads[i];
+            ui_renderer_queue_rect(ui, q.x0, q.y0, q.x1 - q.x0, q.y1 - q.y0, q.color);
+        }
+    }
+
+    // Panels next, so text + bars layer over them.
     for (int i = 0; i < cmds->hud_panel_count; ++i) {
         const HudPanel& p = cmds->hud_panels[i];
         if (p.bg_color)     ui_renderer_queue_rect(ui, p.x, p.y, p.w, p.h, p.bg_color);
@@ -89,13 +97,11 @@ void hud_queue(const RenderCommands* cmds, UiRenderer* ui,
         ui_renderer_queue_rect(ui, x0 + bar_w_px - 2.0f, y0, 2.0f, bar_h_px, kHudBarBorderColor);
     }
 
-    // Text last, on top. HudText doesn't carry a font id yet -- default to
-    // font 0 (the HUD font: ProggyClean). Once we want per-label fonts
-    // here, grow HudText with a font field.
+    // Text last, on top. ui_renderer_queue_text ignores invalid font ids.
     for (int i = 0; i < cmds->hud_text_count; ++i) {
         const HudText& t = cmds->hud_texts[i];
         if (t.text[0] == '\0') continue;
-        ui_renderer_queue_text(ui, 0, t.x, t.y, t.text, t.color);
+        ui_renderer_queue_text(ui, t.font, t.x, t.y, t.text, t.color);
     }
 }
 

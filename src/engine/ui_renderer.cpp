@@ -16,8 +16,8 @@ namespace engine {
 namespace {
 
 constexpr const char* kTag        = "ui";
-constexpr int         kAtlasW     = 512;
-constexpr int         kAtlasH     = 512;
+constexpr int         kAtlasW     = 1024;
+constexpr int         kAtlasH     = 1024;
 constexpr int         kFirstGlyph = 32;
 constexpr int         kNumGlyphs  = 95;   // ASCII 32..126
 
@@ -102,7 +102,7 @@ struct UiRenderer {
     int                      gpu_index_cap    = 0;
 
     UIVertex*                verts            = nullptr;
-    uint16_t*                indices          = nullptr;
+    uint32_t*                indices          = nullptr;
     int                      vert_count       = 0;
     int                      index_count      = 0;
     int                      cpu_vert_cap     = 0;
@@ -317,7 +317,7 @@ void grow_cpu_buffers(UiRenderer* r, int need_verts, int need_indices) {
     if (need_indices > r->cpu_index_cap) {
         int cap = r->cpu_index_cap > 0 ? r->cpu_index_cap : kInitIndexCap;
         while (cap < need_indices) cap *= 2;
-        r->indices = (uint16_t*)std::realloc(r->indices, (size_t)cap * sizeof(uint16_t));
+        r->indices = (uint32_t*)std::realloc(r->indices, (size_t)cap * sizeof(uint32_t));
         r->cpu_index_cap = cap;
     }
 }
@@ -327,14 +327,14 @@ void emit_quad(UiRenderer* r,
                float u0, float v0, float u1, float v1,
                uint32_t color) {
     grow_cpu_buffers(r, r->vert_count + 4, r->index_count + 6);
-    const uint16_t base = (uint16_t)r->vert_count;
+    const uint32_t base = (uint32_t)r->vert_count;
     UIVertex* v = &r->verts[r->vert_count];
     v[0] = { x0, y0, u0, v0, color };
     v[1] = { x1, y0, u1, v0, color };
     v[2] = { x1, y1, u1, v1, color };
     v[3] = { x0, y1, u0, v1, color };
     r->vert_count += 4;
-    uint16_t* i = &r->indices[r->index_count];
+    uint32_t* i = &r->indices[r->index_count];
     i[0] = base + 0;
     i[1] = base + 1;
     i[2] = base + 2;
@@ -361,7 +361,7 @@ void ensure_gpu_buffers(UiRenderer* r) {
         while (cap < r->index_count) cap *= 2;
         SDL_GPUBufferCreateInfo bci{};
         bci.usage = SDL_GPU_BUFFERUSAGE_INDEX;
-        bci.size  = (uint32_t)(cap * sizeof(uint16_t));
+        bci.size  = (uint32_t)(cap * sizeof(uint32_t));
         r->ibo = SDL_CreateGPUBuffer(r->gpu, &bci);
         r->gpu_index_cap = cap;
     }
@@ -456,7 +456,7 @@ void ui_renderer_prepare(UiRenderer* r, SDL_GPUCommandBuffer* cmd) {
     ensure_gpu_buffers(r);
 
     const uint32_t vbytes = (uint32_t)(r->vert_count * sizeof(UIVertex));
-    const uint32_t ibytes = (uint32_t)(r->index_count * sizeof(uint16_t));
+    const uint32_t ibytes = (uint32_t)(r->index_count * sizeof(uint32_t));
     SDL_GPUTransferBufferCreateInfo tbci{};
     tbci.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
     tbci.size  = vbytes + ibytes;
@@ -492,7 +492,7 @@ void ui_renderer_draw(UiRenderer* r, SDL_GPUCommandBuffer* cmd, SDL_GPURenderPas
     SDL_BindGPUVertexBuffers(pass, 0, &vb, 1);
     SDL_GPUBufferBinding ib{};
     ib.buffer = r->ibo;
-    SDL_BindGPUIndexBuffer(pass, &ib, SDL_GPU_INDEXELEMENTSIZE_16BIT);
+    SDL_BindGPUIndexBuffer(pass, &ib, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
     SDL_GPUTextureSamplerBinding tsb{};
     tsb.texture = r->atlas_tex;
