@@ -25,7 +25,7 @@ constexpr const char* kTag = "game";
 // Bump whenever GameState's layout changes so a hot reload re-initialises
 // instead of reading garbage.
 constexpr uint32_t kStateMagic   = 0x484F5053u; // 'HOPS'
-constexpr uint32_t kStateVersion = 6;
+constexpr uint32_t kStateVersion = 7;
 
 // ---- Units ---------------------------------------------------------------
 // World units are pixels of the virtual screen. One tile is kTile pixels.
@@ -146,9 +146,15 @@ constexpr int kChunk      = 1 << kChunkShift;
 constexpr int kMaxChunks  = 4096;
 constexpr int kChunkHash  = 8192;   // power of two, > 2 * kMaxChunks
 
+// Golf-hole clock tags: a tile can exist only "from hole N" and/or only
+// "until hole N" (gone once hole N starts). 0 = no limit. Holes are 1..18.
+constexpr int kHoles = 18;
+
 struct Chunk {
     int32_t cx, cy;
     uint8_t t[kChunk * kChunk];
+    uint8_t from[kChunk * kChunk];
+    uint8_t until[kChunk * kChunk];
 };
 
 struct ChunkMap {
@@ -166,6 +172,7 @@ struct Room {
 };
 
 struct World {
+    int32_t  gate_hole;      // > 0: tile_get hides tiles not present at this hole
     ChunkMap map;
     int32_t  room_count;   // high-water mark; slots may be unused
     Room     rooms[kMaxRooms];
@@ -299,6 +306,15 @@ struct Play {
     StarPos  pending[kMaxPendingStars];
     int32_t  star_total;         // stars in the world (cached)
 
+    // Golf-hole clock. `hole` is what the lair currently shows; it catches
+    // up with `hole_target` (set when pieces commit) on the next room entry
+    // or respawn, so tiles never change under your feet mid-room.
+    int32_t  hole;
+    int32_t  hole_target;
+    float    hole_banner;        // seconds left showing the boss's message
+    bool     finale_seen;
+    float    finale_timer;
+
     float   cam_x, cam_y;     // top-left of the view, world px
     bool    transitioning;
     float   trans_t;
@@ -325,7 +341,11 @@ struct Play {
 
 // ---- Editor --------------------------------------------------------------
 
-struct TileChange { int32_t x, y; uint8_t before, after; };
+struct TileChange {
+    int32_t x, y;
+    uint8_t before, after;
+    uint8_t before_from, before_until, after_from, after_until;
+};
 struct RoomChange { int32_t idx; Room before, after; };
 struct UndoOp     { int32_t tile_begin, tile_end, room_begin, room_end; };
 
@@ -385,6 +405,14 @@ struct Editor {
     RoomChange rooms[kMaxRoomChanges];
 
     uint8_t scratch[kRoomMaxW * kRoomMaxH];   // room-move copy buffer
+    uint8_t scratch_from[kRoomMaxW * kRoomMaxH];
+    uint8_t scratch_until[kRoomMaxW * kRoomMaxH];
+
+    // Golf-hole tags painted with the brush, and the hole being previewed
+    // (0 = show every tile regardless of tags).
+    uint8_t hole_from;
+    uint8_t hole_until;
+    uint8_t preview_hole;
 };
 
 // ---- Top level -----------------------------------------------------------

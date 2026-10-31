@@ -74,12 +74,17 @@ void laser_rect(const Entity& e, float* x, float* y, float* w, float* h, float t
     }
 }
 
+// Pulsing lasers cycle up to 35% faster as the golf round goes on.
+float laser_period() { return kLaserPeriod * (1.0f - 0.35f * hecticness(g_state->play)); }
+
 // 0 = off, 1 = warning flicker, 2 = lethal.
 int laser_phase(const Entity& e, float t) {
     if (e.timer < 0) return 2;  // constant laser
-    float u = std::fmod(t + e.timer, kLaserPeriod);
-    if (u < kLaserOnTime) return 2;
-    if (u > kLaserPeriod - kLaserWarnTime) return 1;
+    float period = laser_period();
+    float on = kLaserOnTime * (period / kLaserPeriod);
+    float u = std::fmod(t + e.timer * period * 0.5f, period);
+    if (u < on) return 2;
+    if (u > period - kLaserWarnTime) return 1;
     return 0;
 }
 
@@ -100,7 +105,7 @@ void hazard_init(GameState& s, Entity& e, uint8_t t) {
     switch (e.kind) {
         case E_LASER:
             e.dir = (int8_t)laser_dir(s, e.tx, e.ty);
-            e.timer = t == T_LASER ? -1.0f : (t == T_LASER_A ? 0.0f : kLaserPeriod * 0.5f);
+            e.timer = t == T_LASER ? -1.0f : (t == T_LASER_A ? 0.0f : 1.0f);   // phase
             e.x = laser_length(s, e.tx, e.ty, e.dir);
             break;
         case E_SHARK:
@@ -145,7 +150,8 @@ void hazard_update(GameState& s, Entity& e, float dt) {
         e.state = (uint8_t)laser_phase(e, g.time);
         break;
     case E_SHARK: {
-        float nx = e.x + (float)e.dir * kSharkSpeed * dt;
+        float hk = 1.0f + 0.4f * hecticness(g);
+        float nx = e.x + (float)e.dir * kSharkSpeed * hk * dt;
         if (shark_fits(s, nx, e.y)) e.x = nx;
         else e.dir = (int8_t)-e.dir;
         // Drift toward the player if they're swimming nearby.
@@ -153,19 +159,19 @@ void hazard_update(GameState& s, Entity& e, float dt) {
         float pcx = (float)p.x + kPlayerW * 0.5f, pcy = (float)p.y + kPlayerH * 0.5f;
         if (water_at_px(s.world, (int)pcx, (int)pcy) && std::fabs(pcx - (e.x + 12)) < 7 * kTile) {
             float ty = pcy - 5;
-            float ny = e.y + signf(ty - e.y) * fminf_(kSharkChase * dt, std::fabs(ty - e.y));
+            float ny = e.y + signf(ty - e.y) * fminf_(kSharkChase * hk * dt, std::fabs(ty - e.y));
             if (shark_fits(s, e.x, ny)) e.y = ny;
         }
         break;
     }
     case E_DRONE_H: {
-        float nx = e.x + (float)e.dir * kDroneSpeed * dt;
+        float nx = e.x + (float)e.dir * kDroneSpeed * (1.0f + 0.5f * hecticness(g)) * dt;
         if (drone_blocked(s, r, nx, e.y)) e.dir = (int8_t)-e.dir;
         else e.x = nx;
         break;
     }
     case E_DRONE_V: {
-        float ny = e.y + (float)e.dir * kDroneSpeed * dt;
+        float ny = e.y + (float)e.dir * kDroneSpeed * (1.0f + 0.5f * hecticness(g)) * dt;
         if (drone_blocked(s, r, e.x, ny)) e.dir = (int8_t)-e.dir;
         else e.y = ny;
         break;

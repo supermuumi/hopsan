@@ -225,6 +225,7 @@ void place_player(GameState& s, int x, int y, int room) {
     p.squash_x = p.squash_y = 1;
     p.on_ground = true;
     g.room = room;
+    if (g.hole > 0) s.world.gate_hole = g.hole;   // play always sees the current hole
     build_entities(s, room);
     snap_camera(s);
 }
@@ -240,6 +241,10 @@ void play_start(GameState& s) {
     Play& g = s.play;
     progress_rollback(s);
     g.star_total = count_world_stars(s.world);
+    update_hole_target(s);
+    g.hole = g.hole_target;
+    s.world.gate_hole = g.hole;
+    g.hole_banner = 4.0f;
     int tx = 0, ty = 0, x = 0, y = 0, room = -1;
     if (find_start(s.world, &tx, &ty)) {
         tile_spawn_pos(tx, ty, &x, &y);
@@ -270,6 +275,7 @@ void respawn(GameState& s) {
         room = room_at_px(s.world, g.spawn_x + kPlayerW / 2, g.spawn_y + kPlayerH / 2);
     if (room < 0) { play_start(s); return; }
     progress_rollback(s);   // stars picked up in this attempt go back
+    apply_hole(s);
     place_player(s, g.spawn_x, g.spawn_y, room);
 }
 
@@ -329,8 +335,10 @@ void enter_room(GameState& s, int room) {
     const Room& r = s.world.rooms[room];
     bool going_up = (p.y + kPlayerH / 2) < old.y * kTile;
 
-    // Got out of the old room: whatever you picked up / spent there sticks.
+    // Got out of the old room: whatever you picked up there sticks, and
+    // the golf clock may move on (the new room is built for the new hole).
     progress_commit(s);
+    apply_hole(s);
 
     g.trans_from_x = g.cam_x;
     g.trans_from_y = g.cam_y;
@@ -929,6 +937,8 @@ void sim_step(GameState& s) {
     g.time += dt;
     g.shake = fmaxf_(0, g.shake - dt);
     g.room_banner = fmaxf_(0, g.room_banner - dt);
+    g.hole_banner = fmaxf_(0, g.hole_banner - dt);
+    g.finale_timer = fmaxf_(0, g.finale_timer - dt);
     update_particles(g, dt);
 
     if (g.freeze > 0) { g.freeze -= dt; return; }
@@ -1146,6 +1156,7 @@ void render_play(GameState& s) {
     draw_player(s);
     draw_water_front(s.world, g.time);
 
+    draw_alarm(s, ox, oy, vw, vh);
     if (g.fade > 0) srect((float)ox, (float)oy, (float)vw, (float)vh, rgba(0, 0, 0, (int)(g.fade * 255)));
 
     // Letterbox.
@@ -1174,6 +1185,7 @@ void render_play(GameState& s) {
     }
     text_sh((float)ox + 10 * g_ui, (float)(oy + vh) - 10 * g_ui, rgba(200, 200, 215, 160), font_small(),
             "Tab: editor   F1: console");
+    draw_clock_hud(s, ox, oy, vw, vh);
 }
 
 } // namespace hop

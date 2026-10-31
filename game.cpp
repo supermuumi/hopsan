@@ -18,6 +18,7 @@
 #include "game/world.cpp"
 #include "game/progress.cpp"
 #include "game/draw.cpp"
+#include "game/clock.cpp"
 #include "game/hazards.cpp"
 #include "game/play.cpp"
 #include "game/editor.cpp"
@@ -77,6 +78,18 @@ void cmd_progress_reset(int, const char**, void* user) {
     logf(LOG_LEVEL_INFO, "progress reset: no stars collected");
 }
 
+void cmd_hole(int argc, const char** argv, void* user) {
+    GameState* s = state_of(user);
+    if (argc >= 2) {
+        Play& g = s->play;
+        g.hole = g.hole_target = clampi(std::atoi(argv[1]), 1, kHoles);
+        s->world.gate_hole = g.hole;
+        g.hole_banner = 4.0f;
+        build_entities(*s, g.room);
+    }
+    logf(LOG_LEVEL_INFO, "hole %d (target %d)", s->play.hole, s->play.hole_target);
+}
+
 void cmd_room_name(int argc, const char** argv, void* user) {
     GameState* s = state_of(user);
     int ri = -1;
@@ -108,6 +121,7 @@ void register_commands(EnginePlatform* platform) {
     platform->console_register("restart", cmd_restart, "start a new run from the start tile");
     platform->console_register("respawn_mode", cmd_respawn_mode, "respawn_mode [room|checkpoint]");
     platform->console_register("progress_reset", cmd_progress_reset, "forget collected stars");
+    platform->console_register("hole", cmd_hole, "hole [n] -- jump the golf clock to hole n (testing)");
     platform->console_register("wall_jump", cmd_wall_jump, "wall_jump [celeste|hk] -- wall jump style");
     platform->console_register("room_name", cmd_room_name, "room_name <name> -- rename room under cursor / player");
     platform->console_register("edit", cmd_edit, "toggle the level editor (same as Tab)");
@@ -170,6 +184,10 @@ GAME_EXPORT void game_tick(void* memory, const FrameInput* input) {
         else editor_exit(*s, false);
         return;
     }
+
+    // Golf-hole gating: play shows the lair at the current hole; the editor
+    // shows everything unless previewing a hole.
+    s->world.gate_hole = s->mode == MODE_PLAY ? s->play.hole : s->ed.preview_hole;
 
     if (s->mode == MODE_PLAY) {
         gather_actions(*s, *input);

@@ -74,14 +74,22 @@ void undo_end(Editor& e) {
     e.dirty = true;
 }
 
-void ed_set_tile(GameState& s, int tx, int ty, uint8_t t) {
+// Set a tile and its golf-hole tags, recording the change for undo.
+void ed_set_tile_tags(GameState& s, int tx, int ty, uint8_t t, uint8_t from, uint8_t until) {
     Editor& e = s.ed;
-    uint8_t before = tile_get(s.world, tx, ty);
-    if (before == t) return;
+    if (t == T_EMPTY) from = until = 0;
+    uint8_t before = tile_raw(s.world, tx, ty), bf, bu;
+    tile_tags(s.world, tx, ty, &bf, &bu);
+    if (before == t && bf == from && bu == until) return;
     if (e.op_open && e.tile_used < kMaxTileChanges)
-        e.tiles[e.tile_used++] = TileChange{ tx, ty, before, t };
-    tile_set(s.world, tx, ty, t);
+        e.tiles[e.tile_used++] = TileChange{ tx, ty, before, t, bf, bu, from, until };
+    tile_set_full(s.world, tx, ty, t, from, until);
     e.dirty = true;
+}
+
+// Paint with the brush's golf-hole tags.
+void ed_set_tile(GameState& s, int tx, int ty, uint8_t t) {
+    ed_set_tile_tags(s, tx, ty, t, s.ed.hole_from, s.ed.hole_until);
 }
 
 void ed_set_room(GameState& s, int idx, const Room& after) {
@@ -100,7 +108,7 @@ void undo(GameState& s) {
     for (int i = op.room_end - 1; i >= op.room_begin; --i) s.world.rooms[e.rooms[i].idx] = e.rooms[i].before;
     for (int i = op.tile_end - 1; i >= op.tile_begin; --i) {
         const TileChange& c = e.tiles[i];
-        tile_set(s.world, c.x, c.y, c.before);
+        tile_set_full(s.world, c.x, c.y, c.before, c.before_from, c.before_until);
     }
     e.dirty = true;
     set_status(e, "undo (%d left)", e.op_cursor);
@@ -112,7 +120,7 @@ void redo(GameState& s) {
     const UndoOp& op = e.ops[e.op_cursor++];
     for (int i = op.tile_begin; i < op.tile_end; ++i) {
         const TileChange& c = e.tiles[i];
-        tile_set(s.world, c.x, c.y, c.after);
+        tile_set_full(s.world, c.x, c.y, c.after, c.after_from, c.after_until);
     }
     for (int i = op.room_begin; i < op.room_end; ++i) s.world.rooms[e.rooms[i].idx] = e.rooms[i].after;
     e.dirty = true;
@@ -186,7 +194,7 @@ void paint_tile(GameState& s, int tx, int ty, uint8_t value) {
             if (!r.used) continue;
             for (int y = r.y; y < r.y + r.h; ++y)
                 for (int x = r.x; x < r.x + r.w; ++x)
-                    if ((x != tx || y != ty) && tile_get(s.world, x, y) == T_START) ed_set_tile(s, x, y, T_EMPTY);
+                    if ((x != tx || y != ty) && tile_raw(s.world, x, y) == T_START) ed_set_tile(s, x, y, T_EMPTY);
         }
     }
     ed_set_tile(s, tx, ty, value);
@@ -282,8 +290,10 @@ void editor_exit(GameState& s, bool at_cursor) {
         g.spawn_wants_ground = true;
         g.dying = false; g.fade = 0; g.transitioning = false;
         progress_rollback(s);   // a playtest jump doesn't keep this room's pickups
+        s.world.gate_hole = g.hole;
         place_player(s, x, y, room);
     } else {
+        s.world.gate_hole = g.hole;
         int room = room_at_px(s.world, g.p.x + kPlayerW / 2, g.p.y + kPlayerH / 2);
         if (room < 0) { play_start(s); }
         else {
@@ -356,12 +366,16 @@ void editor_room_drag_finish(GameState& s) {
         const Room& o = e.drag_orig;
         for (int y = 0; y < o.h; ++y)
             for (int x = 0; x < o.w; ++x) {
-                e.scratch[y * kRoomMaxW + x] = tile_get(s.world, o.x + x, o.y + y);
+                int i = y * kRoomMaxW + x;
+                e.scratch[i] = tile_raw(s.world, o.x + x, o.y + y);
+                tile_tags(s.world, o.x + x, o.y + y, &e.scratch_from[i], &e.scratch_until[i]);
                 ed_set_tile(s, o.x + x, o.y + y, T_EMPTY);
             }
         for (int y = 0; y < o.h; ++y)
-            for (int x = 0; x < o.w; ++x)
-                ed_set_tile(s, c.x + x, c.y + y, e.scratch[y * kRoomMaxW + x]);
+            for (int x = 0; x < o.w; ++x) {
+                int i = y * kRoomMaxW + x;
+                ed_set_tile_tags(s, c.x + x, c.y + y, e.scratch[i], e.scratch_from[i], e.scratch_until[i]);
+            }
         ed_set_room(s, e.drag_room, c);
         set_status(e, "moved %s", c.name);
     } else {
@@ -443,6 +457,21 @@ void editor_tick(GameState& s, float dt) {
             for (int i = 0; i < kPaletteN; ++i) if (kPalette[i] == T_SPIKE_U) e.brush = i;
         }
         if (kp[SC_G]) e.grid = !e.grid;
+        // Golf-hole tags for the brush: [ ] = "from hole", Shift+[ ] = "until hole".
+        constexpr int SC_LBRACKET = 47, SC_RBRACKET = 48, SC_COMMA = 54, SC_PERIOD = 55;
+        if (kp[SC_LBRACKET] || kp[SC_RBRACKET]) {
+            int d = kp[SC_RBRACKET] ? 1 : -1;
+            uint8_t& v = shift ? e.hole_until : e.hole_from;
+            v = (uint8_t)clampi((int)v + d, 0, kHoles);
+            if (e.hole_from && e.hole_until && e.hole_until <= e.hole_from) {
+                if (shift) e.hole_from = (uint8_t)imax(0, e.hole_until - 1);
+                else e.hole_until = (uint8_t)imin(kHoles, e.hole_from + 1);
+            }
+            set_status(e, "brush: %s", "hole tags updated");
+        }
+        // Preview the lair as it is at a given hole (0 = show everything).
+        if (kp[SC_COMMA])  e.preview_hole = (uint8_t)(e.preview_hole == 0 ? kHoles : e.preview_hole - 1);
+        if (kp[SC_PERIOD]) e.preview_hole = (uint8_t)(e.preview_hole >= kHoles ? 0 : e.preview_hole + 1);
         if (kp[SC_H] || kp[SC_F2]) e.help = !e.help;
         if (kp[SC_R]) {
             e.room_mode = !e.room_mode;
@@ -545,10 +574,12 @@ void editor_tick(GameState& s, float dt) {
     if (!e.painting && !over_palette) {
         bool lp = in.mouse_pressed[0], rp = in.mouse_pressed[2];
         if ((lp || rp) && alt) {
-            uint8_t t = tile_get(s.world, mtx, mty);
+            uint8_t t = tile_raw(s.world, mtx, mty);
+            uint8_t picked = t;
             if (tile_is_spike(t)) { e.spike_dir = t; t = T_SPIKE_U; }
             for (int i = 0; i < kPaletteN; ++i) if (kPalette[i] == t) e.brush = i;
-            set_status(e, "picked %s", kTileInfo[tile_get(s.world, mtx, mty)].name);
+            tile_tags(s.world, mtx, mty, &e.hole_from, &e.hole_until);   // tags come along
+            set_status(e, "picked %s", kTileInfo[picked].name);
         } else if ((lp || rp) && shift) {
             e.rect_drag = true;
             e.rect_erase = rp;
@@ -690,6 +721,35 @@ void render_editor(GameState& s) {
         }
     }
 
+    // Golf-hole tag markers: green corner = appears from hole N,
+    // red corner = gone from hole N. Number shown when zoomed in.
+    if (tile_px >= 6) {
+        int tx0 = floordiv((int)std::floor(e.cam_x), kTile) - 1;
+        int ty0 = floordiv((int)std::floor(e.cam_y), kTile) - 1;
+        int nx = (int)(W / tile_px) + 3, ny = (int)(H / tile_px) + 3;
+        int labels = 0;
+        for (int j = 0; j < ny; ++j)
+            for (int i = 0; i < nx; ++i) {
+                int tx = tx0 + i, ty = ty0 + j;
+                uint8_t from, until;
+                tile_tags(s.world, tx, ty, &from, &until);
+                if (!from && !until) continue;
+                float px = (float)(tx * kTile), py = (float)(ty * kTile);
+                bool present = e.preview_hole == 0 || hole_allows(e.preview_hole, from, until);
+                if (!present) wframe(px, py, kTile, kTile, 1, rgba(255, 255, 255, 70));
+                if (from)  wrect(px, py, 5, 5, rgba(90, 230, 120, 230));
+                if (until) wrect(px + kTile - 5, py, 5, 5, rgba(255, 90, 90, 230));
+                if (tile_px >= 28 && labels < 80) {
+                    ++labels;
+                    char lb[16];
+                    if (from && until) std::snprintf(lb, sizeof(lb), "%d-%d", from, until - 1);
+                    else if (from) std::snprintf(lb, sizeof(lb), "%d+", from);
+                    else std::snprintf(lb, sizeof(lb), "<%d", until);
+                    text_sh(to_sx(px) + 2, to_sy(py + kTile) - 2, rgba(255, 255, 255), font_small(), lb);
+                }
+            }
+    }
+
     // Player position.
     {
         const Player& p = s.play.p;
@@ -747,6 +807,22 @@ void render_editor(GameState& s) {
                       (double)(e.zoom / ed_scale_base(s)), mtx, mty,
                       hover_room >= 0 ? s.world.rooms[hover_room].name : "(no room)");
         text(8 * g_ui, line_h(), rgba(235, 235, 245), font_small(), "%s", buf);
+        // Second line: golf-hole brush tags, preview, hovered tile's tags.
+        char tags[40] = "always";
+        if (e.hole_from && e.hole_until) std::snprintf(tags, sizeof(tags), "holes %d-%d", e.hole_from, e.hole_until - 1);
+        else if (e.hole_from) std::snprintf(tags, sizeof(tags), "from hole %d", e.hole_from);
+        else if (e.hole_until) std::snprintf(tags, sizeof(tags), "until hole %d", e.hole_until);
+        uint8_t hf, hu;
+        tile_tags(s.world, mtx, mty, &hf, &hu);
+        char hov[40] = "";
+        if (hf || hu) std::snprintf(hov, sizeof(hov), "   hovered tile: from %d until %d", hf, hu);
+        char prev[24] = "all holes";
+        if (e.preview_hole) std::snprintf(prev, sizeof(prev), "hole %d", e.preview_hole);
+        std::snprintf(buf, sizeof(buf), "brush: %s  ([ ] / Shift)   |   preview: %s  (, .)%s", tags, prev, hov);
+        srect(0, line_h() + 8 * g_ui, W, line_h(), rgba(20, 18, 32, 200));
+        text(8 * g_ui, 2 * line_h() + 4 * g_ui,
+             (e.hole_from || e.hole_until || e.preview_hole) ? rgba(140, 240, 160) : rgba(170, 170, 190),
+             font_small(), "%s", buf);
         if (e.status_timer > 0)
             text(W - (float)std::strlen(e.status) * char_w() - 10 * g_ui, line_h(),
                  with_alpha(rgba(255, 220, 120), clampf(e.status_timer, 0, 1)), font_small(), "%s", e.status);
@@ -772,6 +848,9 @@ void render_editor(GameState& s) {
             "Ctrl+Z / Y  undo / redo",
             "Ctrl+S      save world",
             "G           grid   H  hide help",
+            "[ / ]       brush: appears from hole N",
+            "Shift+[ / ] brush: gone from hole N",
+            ", / .       preview the lair at a hole",
             "",
             "PLAY  move   WASD / arrows",
             "      jump   Space / C / K",

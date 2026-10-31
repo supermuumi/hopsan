@@ -69,6 +69,32 @@ strawberries). The HUD count is yellow while a pickup is uncommitted. Collected 
 show as faint ghosts. Progress is saved to `progress.txt`
 next to the engine binary; `progress_reset` in the console forgets it.
 
+## The golf clock
+
+The boss is playing 18 holes. Every plan piece you commit moves his round
+on; the last piece is always the 18th hole, when he walks back in. The
+HUD shows the current hole (top right). A new hole takes effect when you
+next enter a room or respawn, never mid-room, and comes with a message
+from the course.
+
+As the round goes on the lair gets more hectic: pulsing lasers cycle up to
+35% faster, drones and sharks speed up, and from hole 13 the alarm lights
+come on. Level designers can also tag any tile in the editor:
+
+- `[` / `]` sets the brush's "appears from hole N" (green corner marker).
+- `Shift+[` / `Shift+]` sets "gone from hole N" (red corner marker).
+- `,` / `.` previews the lair at a given hole (0 = show everything).
+- Alt+click picks up a tile's tags along with its type.
+
+Use tags for henchmen arriving, lasers switching on, doors sealing and
+bridges collapsing. Every room must stay reachable at every hole. In the
+starter world a henchman turns up in Your Desk from hole 4, the Boiler
+Room gains a laser at 5, Reception a second drone at 7, the Server Farm a
+laser at 10, and from hole 13 the door from Reception to the Server Farm
+seals (go round through the Shark Tank, which now has a way back up).
+
+Console: `hole <n>` jumps the clock for testing.
+
 ## The world
 
 - The world is made of **rooms**: rectangles of 16px tiles placed on one
@@ -151,11 +177,13 @@ back to the built-in placeholder art. The player is still placeholder art.
 | Undo / redo | Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) |
 | Save | Ctrl+S |
 | Grid / help | G / H |
+| Golf-hole tags on the brush | `[` `]` (from), Shift+`[` `]` (until) |
+| Preview the lair at a hole | `,` `.` |
 
 On macOS, Cmd works in place of Ctrl. You can only paint inside rooms,
 because tiles outside rooms aren't saved. Console commands: `save`,
 `load`, `restart`, `edit`, `respawn_mode`, `wall_jump`, `progress_reset`,
-and `room_name <name>` (renames
+`hole`, and `room_name <name>` (renames
 the room under the cursor).
 
 ## Engine notes

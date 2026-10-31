@@ -50,6 +50,8 @@ Chunk* chunk_get_or_create(ChunkMap& m, int cx, int cy) {
             Chunk& c = m.chunks[m.count];
             c.cx = cx; c.cy = cy;
             std::memset(c.t, 0, sizeof(c.t));
+            std::memset(c.from, 0, sizeof(c.from));
+            std::memset(c.until, 0, sizeof(c.until));
             m.hash[s] = ++m.count;
             return &c;
         }
@@ -60,19 +62,50 @@ Chunk* chunk_get_or_create(ChunkMap& m, int cx, int cy) {
     return nullptr;
 }
 
+inline int chunk_index(int tx, int ty) { return (ty & (kChunk - 1)) * kChunk + (tx & (kChunk - 1)); }
+
+bool hole_allows(int hole, uint8_t from, uint8_t until) {
+    if (from && hole < from) return false;
+    if (until && hole >= until) return false;
+    return true;
+}
+
+// The tile as placed, ignoring golf-hole tags (editor, save file).
+uint8_t tile_raw(const World& w, int tx, int ty) {
+    Chunk* c = chunk_find(const_cast<ChunkMap&>(w.map), tx >> kChunkShift, ty >> kChunkShift);
+    if (!c) return T_EMPTY;
+    return c->t[chunk_index(tx, ty)];
+}
+
+void tile_tags(const World& w, int tx, int ty, uint8_t* from, uint8_t* until) {
+    Chunk* c = chunk_find(const_cast<ChunkMap&>(w.map), tx >> kChunkShift, ty >> kChunkShift);
+    *from = c ? c->from[chunk_index(tx, ty)] : 0;
+    *until = c ? c->until[chunk_index(tx, ty)] : 0;
+}
+
+// The tile as the game sees it: hidden if its golf-hole tags exclude the
+// current hole (w.gate_hole).
 uint8_t tile_get(const World& w, int tx, int ty) {
     Chunk* c = chunk_find(const_cast<ChunkMap&>(w.map), tx >> kChunkShift, ty >> kChunkShift);
     if (!c) return T_EMPTY;
-    return c->t[(ty & (kChunk - 1)) * kChunk + (tx & (kChunk - 1))];
+    int i = chunk_index(tx, ty);
+    if (w.gate_hole > 0 && !hole_allows(w.gate_hole, c->from[i], c->until[i])) return T_EMPTY;
+    return c->t[i];
 }
 
-void tile_set(World& w, int tx, int ty, uint8_t t) {
-    Chunk* c = (t == T_EMPTY)
+void tile_set_full(World& w, int tx, int ty, uint8_t t, uint8_t from, uint8_t until) {
+    bool empty = t == T_EMPTY;
+    Chunk* c = empty
         ? chunk_find(w.map, tx >> kChunkShift, ty >> kChunkShift)
         : chunk_get_or_create(w.map, tx >> kChunkShift, ty >> kChunkShift);
     if (!c) return;
-    c->t[(ty & (kChunk - 1)) * kChunk + (tx & (kChunk - 1))] = t;
+    int i = chunk_index(tx, ty);
+    c->t[i] = t;
+    c->from[i] = empty ? 0 : from;
+    c->until[i] = empty ? 0 : until;
 }
+
+void tile_set(World& w, int tx, int ty, uint8_t t) { tile_set_full(w, tx, ty, t, 0, 0); }
 
 void world_clear(World& w) {
     std::memset(&w.map.hash, 0, sizeof(w.map.hash));
@@ -124,7 +157,7 @@ bool find_start(const World& w, int* out_tx, int* out_ty) {
         if (!r.used) continue;
         for (int y = r.y; y < r.y + r.h; ++y)
             for (int x = r.x; x < r.x + r.w; ++x)
-                if (tile_get(w, x, y) == T_START) { *out_tx = x; *out_ty = y; return true; }
+                if (tile_raw(w, x, y) == T_START) { *out_tx = x; *out_ty = y; return true; }
     }
     return false;
 }
@@ -157,13 +190,20 @@ bool world_save(const World& w, const char* path) {
         std::fprintf(f, "room %d %d %d %d %s\n", r.x, r.y, r.w, r.h, r.name[0] ? r.name : "room");
         for (int y = 0; y < r.h; ++y) {
             for (int x = 0; x < r.w; ++x) {
-                uint8_t t = tile_get(w, r.x + x, r.y + y);
+                uint8_t t = tile_raw(w, r.x + x, r.y + y);
                 line[x] = kTileInfo[t < T_COUNT ? t : 0].ch;
             }
             line[r.w] = '\n';
             line[r.w + 1] = 0;
             std::fputs(line, f);
         }
+        // Golf-hole tags, room-relative: hole <x> <y> <from> <until>
+        for (int y = 0; y < r.h; ++y)
+            for (int x = 0; x < r.w; ++x) {
+                uint8_t from, until;
+                tile_tags(w, r.x + x, r.y + y, &from, &until);
+                if (from || until) std::fprintf(f, "hole %d %d %d %d\n", x, y, from, until);
+            }
         std::fputc('\n', f);
         ++saved;
     }
@@ -195,7 +235,16 @@ bool world_load(World& w, const char* path) {
     world_clear(w);
     static char line[1024];
     int rooms = 0;
+    int last_x = 0, last_y = 0;
+    bool have_room = false;
     while (std::fgets(line, sizeof(line), f)) {
+        int hx, hy, hf, hu;
+        if (have_room && std::sscanf(line, "hole %d %d %d %d", &hx, &hy, &hf, &hu) == 4) {
+            uint8_t t = tile_raw(w, last_x + hx, last_y + hy);
+            if (t != T_EMPTY)
+                tile_set_full(w, last_x + hx, last_y + hy, t, (uint8_t)clampi(hf, 0, kHoles), (uint8_t)clampi(hu, 0, kHoles));
+            continue;
+        }
         if (std::strncmp(line, "room ", 5) != 0) continue;
         Room r{};
         char name[64] = "room";
@@ -216,6 +265,7 @@ bool world_load(World& w, const char* path) {
                 if (t != T_EMPTY) tile_set(w, r.x + x, r.y + y, t);
             }
         }
+        last_x = r.x; last_y = r.y; have_room = true;
         int slot = room_alloc_slot(w);
         if (slot < 0) { logf(LOG_LEVEL_ERROR, "load: too many rooms"); break; }
         w.rooms[slot] = r;
