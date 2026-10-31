@@ -26,6 +26,11 @@ constexpr float kWallJumpH       = 220.0f;
 constexpr float kWallJumpForce   = 0.16f;
 constexpr int   kWallJumpCheck   = 3;
 constexpr float kWallSlideMax    = 70.0f;
+// Hollow Knight-style wall jump: a short kick away, then full air control so
+// holding toward the wall carries you straight back to it.
+constexpr float kHkWallJumpH     = 120.0f;
+constexpr float kHkWallJumpForce = 0.08f;
+constexpr float kHkWallSlideMax  = 50.0f;
 constexpr float kDashSpeed       = 460.0f;
 constexpr float kEndDashSpeed    = 300.0f;
 constexpr float kDashTime        = 0.15f;
@@ -371,15 +376,24 @@ void do_jump(GameState& s, int mx) {
     dust(g, (float)p.x + kPlayerW * 0.5f, (float)(p.y + kPlayerH), 4);
 }
 
-void do_wall_jump(GameState& s, int dir) {
+// `mx` is the held horizontal input at the moment of the jump.
+void do_wall_jump(GameState& s, int dir, int mx) {
     Play& g = s.play;
     Player& p = g.p;
     p.jump_buffer = 0;
     p.coyote = 0;
     p.var_jump_timer = kVarJumpTime;
-    p.force_move_timer = kWallJumpForce;
-    p.force_move_x = (int8_t)dir;
-    p.vx = (float)dir * kWallJumpH;
+    if (g.wall_style == WALL_HK) {
+        p.force_move_timer = kHkWallJumpForce;
+        p.force_move_x = (int8_t)dir;
+        p.vx = (float)dir * kHkWallJumpH;
+    } else {
+        // Like Celeste: input is only locked away from the wall if you were
+        // holding a direction. A neutral wall jump keeps full control.
+        p.force_move_timer = mx != 0 ? kWallJumpForce : 0.0f;
+        p.force_move_x = (int8_t)dir;
+        p.vx = (float)dir * kWallJumpH;
+    }
     p.vy = kJumpSpeed;
     p.var_jump_speed = p.vy;
     p.var_jump_auto = false;
@@ -563,7 +577,7 @@ void player_update(GameState& s, float dt) {
         }
         if (p.jump_buffer > 0) {
             if (mx == -p.facing) {
-                do_wall_jump(s, -p.facing);
+                do_wall_jump(s, -p.facing, mx);
             } else {
                 p.stamina -= kClimbJumpCost;
                 do_jump(s, 0);
@@ -602,7 +616,7 @@ void player_update(GameState& s, float dt) {
             break;
         }
 
-        float mult = p.on_ground ? 1.0f : kAirMult;
+        float mult = (p.on_ground || g.wall_style == WALL_HK) ? 1.0f : kAirMult;
         float target = (float)mx * kMaxRun;
         if (std::fabs(p.vx) > kMaxRun && signf(p.vx) == (float)mx)
             p.vx = approach(p.vx, target, kRunReduce * mult * dt);
@@ -612,7 +626,7 @@ void player_update(GameState& s, float dt) {
         float max_fall = my > 0 ? kFastFall : kMaxFall;
         if (!p.on_ground && p.vy > 0 && mx != 0
             && collide_tiles(s, p.x + mx, p.y, kPlayerW, kPlayerH)) {
-            max_fall = kWallSlideMax;
+            max_fall = g.wall_style == WALL_HK ? kHkWallSlideMax : kWallSlideMax;
             p.slide_dust -= dt;
             if (p.slide_dust <= 0) {
                 p.slide_dust = 0.08f;
@@ -639,9 +653,9 @@ void player_update(GameState& s, float dt) {
             } else if (p.coyote > 0) {
                 do_jump(s, mx);
             } else if (collide_tiles(s, p.x + kWallJumpCheck, p.y, kPlayerW, kPlayerH)) {
-                do_wall_jump(s, -1);
+                do_wall_jump(s, -1, a.mx);
             } else if (collide_tiles(s, p.x - kWallJumpCheck, p.y, kPlayerW, kPlayerH)) {
-                do_wall_jump(s, +1);
+                do_wall_jump(s, +1, a.mx);
             }
         }
         break;

@@ -55,6 +55,18 @@ void cmd_respawn_mode(int argc, const char** argv, void* user) {
          s->play.respawn_mode == RESPAWN_ROOM_ENTRY ? "room (room entry or checkpoint)" : "checkpoint (last checkpoint only)");
 }
 
+void cmd_wall_jump(int argc, const char** argv, void* user) {
+    GameState* s = state_of(user);
+    if (argc >= 2) {
+        if (std::strcmp(argv[1], "celeste") == 0) s->play.wall_style = WALL_CELESTE;
+        else if (std::strcmp(argv[1], "hk") == 0) s->play.wall_style = WALL_HK;
+        else { logf(LOG_LEVEL_WARN, "usage: wall_jump [celeste|hk]"); return; }
+    }
+    logf(LOG_LEVEL_INFO, "wall_jump = %s", s->play.wall_style == WALL_HK
+         ? "hk (short kick, hold toward the wall to climb it)"
+         : "celeste (kick away; climb with grab + stamina)");
+}
+
 void cmd_room_name(int argc, const char** argv, void* user) {
     GameState* s = state_of(user);
     int ri = -1;
@@ -85,6 +97,7 @@ void register_commands(EnginePlatform* platform) {
     platform->console_register("load", cmd_load, "reload the world from disk (drops unsaved edits)");
     platform->console_register("restart", cmd_restart, "start a new run from the start tile");
     platform->console_register("respawn_mode", cmd_respawn_mode, "respawn_mode [room|checkpoint]");
+    platform->console_register("wall_jump", cmd_wall_jump, "wall_jump [celeste|hk] -- wall jump style");
     platform->console_register("room_name", cmd_room_name, "room_name <name> -- rename room under cursor / player");
     platform->console_register("edit", cmd_edit, "toggle the level editor (same as Tab)");
 }

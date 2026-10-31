@@ -46,6 +46,14 @@ Movement: variable-height jumps, coyote time, jump buffering, wall slide,
 wall jump, an air dash that refills on landing, and wall climbing with
 stamina (you flash white when it's about to run out).
 
+Wall jump has two styles, switched with the `wall_jump` console command (F1):
+- `wall_jump celeste` (default): kicks you away from the wall. If you're
+  holding a direction your input is locked away from the wall for a moment;
+  a neutral wall jump keeps full control. Climbing one wall needs grab.
+- `wall_jump hk`: Hollow Knight-style. A short kick (about one tile) with
+  full air control, so holding toward the wall and tapping jump climbs it.
+  Slower wall slide.
+
 ## The world
 
 - The world is made of **rooms**: rectangles of 16px tiles placed on one
@@ -117,7 +125,7 @@ back to the built-in placeholder art. The player is still placeholder art.
 
 On macOS, Cmd works in place of Ctrl. You can only paint inside rooms,
 because tiles outside rooms aren't saved. Console commands: `save`,
-`load`, `restart`, `edit`, `respawn_mode`, and `room_name <name>` (renames
+`load`, `restart`, `edit`, `respawn_mode`, `wall_jump`, and `room_name <name>` (renames
 the room under the cursor).
 
 ## Engine notes

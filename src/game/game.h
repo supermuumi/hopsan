@@ -25,7 +25,7 @@ constexpr const char* kTag = "game";
 // Bump whenever GameState's layout changes so a hot reload re-initialises
 // instead of reading garbage.
 constexpr uint32_t kStateMagic   = 0x484F5053u; // 'HOPS'
-constexpr uint32_t kStateVersion = 2;
+constexpr uint32_t kStateVersion = 3;
 
 // ---- Units ---------------------------------------------------------------
 // World units are pixels of the virtual screen. One tile is kTile pixels.
@@ -234,6 +234,11 @@ struct Actions {
 
 // ---- Play mode -----------------------------------------------------------
 
+enum WallStyle : uint8_t {
+    WALL_CELESTE = 0,   // kick away from the wall; climbing needs grab + stamina
+    WALL_HK      = 1,   // Hollow Knight: short kick, hold toward the wall to climb it
+};
+
 enum RespawnMode : uint8_t {
     RESPAWN_ROOM_ENTRY = 0,   // Celeste: where you entered the room (or checkpoint)
     RESPAWN_CHECKPOINT = 1,   // Hollow Knight: last checkpoint touched
@@ -250,6 +255,7 @@ struct Play {
     bool    has_checkpoint;
     int32_t cp_tx, cp_ty;
     uint8_t respawn_mode;
+    uint8_t wall_style;
 
     float   cam_x, cam_y;     // top-left of the view, world px
     bool    transitioning;
