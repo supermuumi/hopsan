@@ -19,6 +19,8 @@ namespace hop {
 constexpr uint8_t kPalette[] = {
     T_ROCK, T_BRICK, T_BG, T_ONEWAY, T_SPIKE_U, T_CRUMBLE,
     T_SPRING, T_CRYSTAL, T_STAR, T_CHECKPOINT, T_WALKER, T_START,
+    T_LASER, T_LASER_A, T_LASER_B, T_WATER, T_SHARK, T_CONVEYOR_L, T_CONVEYOR_R,
+    T_DRONE_H, T_DRONE_V,
     T_DECOR_GRASS, T_DECOR_FERN, T_DECOR_SHROOMS, T_DECOR_RUBBLE,
     T_DECOR_VINES, T_DECOR_CHAIN, T_DECOR_TORCH, T_DECOR_PILLAR,
 };
@@ -135,7 +137,12 @@ void mouse_tile(const GameState& s, int* tx, int* ty) {
     *ty = floordiv((int)std::floor(wy), kTile);
 }
 
-float palette_item_size() { return 40.0f * (float)g_ui; }
+// Shrinks to fit the window when the palette grows.
+float palette_item_size() {
+    float pad = 6.0f * (float)g_ui;
+    float fit = ((float)g_state->in.window_w - 20.0f * g_ui) / (float)kPaletteN - pad;
+    return fminf_(40.0f * (float)g_ui, fmaxf_(16.0f, fit));
+}
 float palette_bar_h()     { return palette_item_size() + 16.0f * (float)g_ui; }
 
 bool mouse_over_palette(const GameState& s) {
@@ -638,6 +645,7 @@ void render_editor(GameState& s) {
     draw_tiles(s.world, false, PASS_BACK);
     draw_tiles(s.world, false, PASS_SOLID);
     draw_tiles(s.world, false, PASS_MOSS);
+    draw_water_front(s.world, s.real_time);
 
     // Room outlines + names.
     for (int i = 0; i < s.world.room_count; ++i) {

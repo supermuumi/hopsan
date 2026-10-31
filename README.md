@@ -54,13 +54,19 @@ Wall jump has two styles, switched with the `wall_jump` console command (F1):
   full air control, so holding toward the wall and tapping jump climbs it.
   Slower wall slide.
 
-## Stars
+## Premise
 
-Stars (`$` in the editor palette, key 9) are collectibles, counted once per
-save. A star you pick up only counts once you **leave the room or touch a
+You're the PA of an evil mastermind and you've accidentally shredded the
+plans for his giga laser. He's popped out for a round of golf. Find every
+piece of the plans in his lair before he gets back.
+
+## Plan pieces
+
+Plan pieces (`$` in the editor palette, key 9; called stars in the code)
+are the collectibles, counted once per save. A piece you pick up only counts once you **leave the room or touch a
 checkpoint**; die before that and it goes back (like Celeste's
-strawberries). The HUD star count is yellow while a pickup is uncommitted.
-Collected stars show as faint ghosts. Progress is saved to `progress.txt`
+strawberries). The HUD count is yellow while a pickup is uncommitted. Collected pieces
+show as faint ghosts. Progress is saved to `progress.txt`
 next to the engine binary; `progress_reset` in the console forgets it.
 
 ## The world
@@ -81,8 +87,22 @@ next to the engine binary; `progress_reset` in the console forgets it.
 
 Tiles: rock, brick, backdrop (decorative), one-way platform, spikes (lethal
 when you move into them), crumble block, spring, dash crystal, checkpoint,
-walker enemy, the start marker, and decorations (grass, fern, mushrooms,
-rubble, vines, chain, torch, pillar). Decorations aren't solid; in the
+walker enemy, the start marker, plan pieces, decorations (grass, fern,
+mushrooms, rubble, vines, chain, torch, pillar), and lair hazards:
+
+- **Lasers** (`L` always on, `j` / `J` pulsing in alternating phases A / B:
+  1.4s on, a flicker warning, then off). An emitter aims away from the wall
+  it's mounted on, and the beam stops at the first solid tile.
+- **Water** (`w`): swim in 8 directions, you slowly float up, jump to leave
+  at the surface. Dash refills underwater.
+- **Sharks** (`K`, placed in water): patrol, and drift toward you when
+  you're swimming nearby.
+- **Conveyor belts** (`{` left, `}` right): solid, carry you while standing.
+- **Security drones** (`D` horizontal, `d` vertical): patrol until they hit a
+  wall, spikes or the room edge. They fly through one-way platforms.
+
+The starter world: the four grounds rooms plus the lair (Your Desk,
+Reception, The Shark Tank, Boiler Room, Server Farm, The Giga Laser). Decorations aren't solid; in the
 editor reach them with Q / E (keys 1-0 cover the first ten brushes).
 
 ## Art

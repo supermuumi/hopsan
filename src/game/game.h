@@ -25,7 +25,7 @@ constexpr const char* kTag = "game";
 // Bump whenever GameState's layout changes so a hot reload re-initialises
 // instead of reading garbage.
 constexpr uint32_t kStateMagic   = 0x484F5053u; // 'HOPS'
-constexpr uint32_t kStateVersion = 5;
+constexpr uint32_t kStateVersion = 6;
 
 // ---- Units ---------------------------------------------------------------
 // World units are pixels of the virtual screen. One tile is kTile pixels.
@@ -69,7 +69,17 @@ enum Tile : uint8_t {
     T_DECOR_CHAIN,   // hangs from the tile's top
     T_DECOR_TORCH,
     T_DECOR_PILLAR,  // two tiles tall, stands on the tile's floor
-    T_STAR,          // collectible, counted once per save
+    T_STAR,          // collectible (plan piece), counted once per save
+    // Lair hazards
+    T_LASER,         // emitter, always on; fires away from the wall it's mounted on
+    T_LASER_A,       // pulsing emitter, phase A
+    T_LASER_B,       // pulsing emitter, phase B (on while A is off)
+    T_WATER,         // swim: 8-way movement, float up, jump out at the surface
+    T_SHARK,         // water tile with a shark that patrols (and chases a bit)
+    T_CONVEYOR_L,    // solid, carries you left
+    T_CONVEYOR_R,    // solid, carries you right
+    T_DRONE_H,       // security drone, patrols horizontally
+    T_DRONE_V,       // security drone, patrols vertically
     T_COUNT
 };
 
@@ -107,11 +117,23 @@ constexpr TileInfo kTileInfo[T_COUNT] = {
     { '|', "chain",      rgba(120, 120, 130, 160)},
     { 't', "torch",      rgba(255, 170, 60, 200) },
     { 'p', "pillar",     rgba(70, 84, 104, 160)  },
-    { '$', "star",       rgba(255, 214, 90)      },
+    { '$', "plan piece", rgba(240, 240, 250)     },
+    { 'L', "laser",      rgba(230, 40, 60)       },
+    { 'j', "laser A",    rgba(230, 90, 60)       },
+    { 'J', "laser B",    rgba(230, 60, 120)      },
+    { 'w', "water",      rgba(40, 110, 200, 140) },
+    { 'K', "shark",      rgba(110, 130, 150)     },
+    { '{', "conveyor L", rgba(80, 80, 96)        },
+    { '}', "conveyor R", rgba(80, 80, 96)        },
+    { 'D', "drone H",    rgba(200, 60, 60)       },
+    { 'd', "drone V",    rgba(200, 60, 60)       },
 };
 
 inline bool tile_is_spike(uint8_t t) { return t >= T_SPIKE_U && t <= T_SPIKE_R; }
 inline bool tile_is_decor(uint8_t t) { return t >= T_DECOR_GRASS && t <= T_DECOR_PILLAR; }
+inline bool tile_is_laser(uint8_t t) { return t == T_LASER || t == T_LASER_A || t == T_LASER_B; }
+inline bool tile_is_water(uint8_t t) { return t == T_WATER || t == T_SHARK; }
+inline int  conveyor_dir(uint8_t t)  { return t == T_CONVEYOR_L ? -1 : (t == T_CONVEYOR_R ? 1 : 0); }
 
 // ---- World storage -------------------------------------------------------
 // Tiles live in one global sparse grid of 32x32 chunks so rooms can sit
@@ -160,6 +182,10 @@ enum EntKind : uint8_t {
     E_CHECKPOINT,
     E_WALKER,
     E_STAR,      // state 0 = available, 1 = picked up (pending), 2 = collected earlier
+    E_LASER,     // dir 0..3 = fires right/left/down/up; x = beam length; state = lethal now
+    E_SHARK,     // x, y = top-left of 24x10 hitbox; dir = facing
+    E_DRONE_H,   // x, y = top-left of 12x10 hitbox; dir = travel direction
+    E_DRONE_V,
 };
 
 struct Entity {

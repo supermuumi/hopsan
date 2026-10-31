@@ -153,6 +153,10 @@ constexpr uint32_t kSteelDark = rgba(130, 138, 160);
 
 bool is_solid_tile(uint8_t t) { return t == T_ROCK || t == T_BRICK; }
 
+// Defined in hazards.cpp (included after this file).
+void draw_hazard_static(GameState& s, uint8_t t, int tx, int ty);
+void draw_conveyor(int tx, int ty, int dir, float t);
+
 // ---- Tile art ------------------------------------------------------------
 // All tile art is authored in a 16x16 local space and placed at (px, py).
 
@@ -392,35 +396,23 @@ void draw_walker(float x, float y, int dir, float t) {
     wrect(ex + (dir > 0 ? 2 : 0), y + 4, 2, 2, rgba(20, 16, 30));
 }
 
-// Pixel star, 13x11 "star pixels" of 1 world unit each.
+// Plan piece: a shredded strip of blueprint (placeholder art).
 void draw_star(float px, float py, float bob, bool ghost) {
-    static const char* rows[11] = {
-        "......#......",
-        ".....###.....",
-        ".....###.....",
-        "#############",
-        ".###########.",
-        "..#########..",
-        "...#######...",
-        "...#######...",
-        "..####.####..",
-        "..###...###..",
-        ".##.......##.",
-    };
-    float ox = px + 1.5f, oy = py + 2.5f + bob;
-    uint32_t lit = ghost ? rgba(255, 230, 150, 60) : rgba(255, 226, 110);
-    uint32_t dim = ghost ? rgba(255, 230, 150, 60) : rgba(226, 150, 40);
-    for (int r = 0; r < 11; ++r) {
-        int c = 0;
-        while (c < 13) {
-            if (rows[r][c] != '#') { ++c; continue; }
-            int start = c;
-            while (c < 13 && rows[r][c] == '#') ++c;
-            // left half lit, right half shaded
-            int mid = imax(start, imin(c, 7));
-            if (mid > start) wrect(ox + start, oy + r, (float)(mid - start), 1, lit);
-            if (c > mid) wrect(ox + mid, oy + r, (float)(c - mid), 1, dim);
-        }
+    float x = px + 4, y = py + 1 + bob;
+    uint32_t paper = ghost ? rgba(170, 200, 255, 50) : rgba(58, 104, 190);
+    uint32_t ink   = ghost ? rgba(220, 235, 255, 40) : rgba(210, 230, 255);
+    // a slightly ragged strip
+    wrect(x, y, 8, 14, paper);
+    wrect(x + 1, y + 14, 2, 1, paper);
+    wrect(x + 5, y + 14, 3, 1, paper);
+    wrect(x + 2, y - 1, 3, 1, paper);
+    if (!ghost) {
+        wrect(x + 1, y + 2, 6, 1, ink);
+        wrect(x + 1, y + 5, 4, 1, ink);
+        wrect(x + 5, y + 5, 1, 4, ink);
+        wrect(x + 1, y + 9, 6, 1, ink);
+        wrect(x + 2, y + 11, 2, 2, ink);
+        wrect(x, y, 1, 14, rgba(255, 255, 255, 90));   // edge highlight
     }
 }
 
@@ -450,6 +442,12 @@ void draw_tile_static(const World& w, uint8_t t, int tx, int ty, float alpha_ent
         case T_WALKER:     draw_walker(px + 1, py + 4, 1, 0); break;
         case T_START:      if (alpha_entities > 0) draw_start_marker(px, py); break;
         case T_STAR:       draw_star(px, py, 0, false); break;
+        case T_CONVEYOR_L: case T_CONVEYOR_R:
+            draw_conveyor(tx, ty, conveyor_dir(t), g_state->mode == MODE_PLAY ? g_state->play.time : g_state->real_time);
+            break;
+        case T_LASER: case T_LASER_A: case T_LASER_B: case T_SHARK: case T_DRONE_H: case T_DRONE_V:
+            draw_hazard_static(*g_state, t, tx, ty);
+            break;
         default:
             if (tile_is_decor(t)) {
                 // A tile holds one thing, so a decoration placed in a
@@ -466,7 +464,8 @@ void draw_tile_static(const World& w, uint8_t t, int tx, int ty, float alpha_ent
 // Tiles that become runtime entities in play mode.
 bool tile_is_entity(uint8_t t) {
     return t == T_CRUMBLE || t == T_SPRING || t == T_CRYSTAL || t == T_CHECKPOINT
-        || t == T_WALKER || t == T_START || t == T_STAR;
+        || t == T_WALKER || t == T_START || t == T_STAR
+        || tile_is_laser(t) || t == T_SHARK || t == T_DRONE_H || t == T_DRONE_V;
 }
 
 enum TilePass { PASS_BACK, PASS_SOLID, PASS_MOSS };

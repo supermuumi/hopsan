@@ -118,7 +118,7 @@ Entity* entity_at_tile(Play& g, uint8_t kind, int tx, int ty) {
 
 bool solid_at(GameState& s, int tx, int ty) {
     uint8_t t = tile_get(s.world, tx, ty);
-    if (t == T_ROCK || t == T_BRICK) return true;
+    if (t == T_ROCK || t == T_BRICK || conveyor_dir(t) != 0 || tile_is_laser(t)) return true;
     if (t == T_CRUMBLE) {
         Entity* e = entity_at_tile(s.play, E_CRUMBLE, tx, ty);
         return !e || e->state != 2;
@@ -194,7 +194,7 @@ void build_entities(GameState& s, int room) {
                 case T_CHECKPOINT: kind = E_CHECKPOINT; break;
                 case T_WALKER:     kind = E_WALKER; break;
                 case T_STAR:       kind = E_STAR; break;
-                default: break;
+                default:           kind = hazard_kind(t); break;
             }
             if (kind < 0) continue;
             if (g.ent_count >= kMaxEntities) return;
@@ -206,6 +206,7 @@ void build_entities(GameState& s, int room) {
             e.y = (float)(ty * kTile + 4);
             e.dir = (hash2(tx, ty) & 1) ? 1 : -1;
             if (kind == E_STAR && star_collected(g, tx, ty)) e.state = 2;
+            hazard_init(s, e, t);
         }
     }
 }
@@ -615,6 +616,25 @@ void player_update(GameState& s, float dt) {
     }
 
     default: {
+        // Swimming: 8-way movement with a gentle float toward the surface.
+        // (Skipped while a jump out of the water is still rising, so the
+        // water doesn't swallow it.)
+        if (water_at_px(s.world, p.x + kPlayerW / 2, p.y + kPlayerH / 2) && p.var_jump_timer <= 0) {
+            if (p.dash_cooldown <= 0) p.dashes = 1;
+            p.stamina = kStaminaMax;
+            float tvx = (float)mx * kSwimSpeed;
+            float tvy = my != 0 ? (float)my * kSwimSpeed : -kSwimRise;
+            p.vx = approach(p.vx, tvx, kSwimAccel * dt);
+            p.vy = approach(p.vy, tvy, kSwimAccel * dt);
+            // Head above the surface: jump out.
+            if (p.jump_buffer > 0 && !water_at_px(s.world, p.x + kPlayerW / 2, p.y + 2))
+                do_jump(s, mx);
+            break;
+        }
+        // Feet still in the water (bobbing at the surface) count as a
+        // place you can jump from.
+        if (water_at_px(s.world, p.x + kPlayerW / 2, p.y + kPlayerH - 2)) p.coyote = kCoyoteTime;
+
         // Grab a wall?
         if (a.grab_held && p.stamina > 0 && !(p.vy < 0 && p.var_jump_timer > 0)
             && collide_tiles(s, p.x + p.facing, p.y, kPlayerW, kPlayerH)) {
@@ -672,6 +692,15 @@ void player_update(GameState& s, float dt) {
 
     move_x(s, p.vx * dt);
     move_y(s, p.vy * dt);
+
+    // Conveyor belts carry you while you stand on them.
+    if (p.state != PS_CLIMB && collide(s, p.x, p.y + 1)) {
+        int ty = floordiv(p.y + kPlayerH, kTile);
+        int carry = 0;
+        for (int tx = floordiv(p.x, kTile); tx <= floordiv(p.x + kPlayerW - 1, kTile); ++tx)
+            if (int d = conveyor_dir(tile_get(s.world, tx, ty))) carry = d;
+        if (carry) move_x(s, (float)carry * kConveyorSpeed * dt);
+    }
 
     // Touching crumble blocks starts them falling.
     if (collide(s, p.x, p.y + 1) && p.vy >= 0) trigger_crumbles_in_box(s, p.x, p.y + kPlayerH, kPlayerW, 1);
@@ -758,7 +787,7 @@ void update_entities(GameState& s, float dt) {
             else e.x = nx;
             break;
         }
-        default: break;
+        default: hazard_update(s, e, dt); break;
         }
     }
 }
@@ -846,7 +875,9 @@ void check_interactions(GameState& s) {
                 return;
             }
             break;
-        default: break;
+        default:
+            if (hazard_touch(s, e)) { die(s); return; }
+            break;
         }
     }
 }
@@ -1055,7 +1086,7 @@ void draw_entities(GameState& s) {
             if (e.state != 1)
                 draw_star(px, py, std::floor(std::sin(g.time * 2.5f + (float)e.tx) * 1.5f + 0.5f), e.state == 2);
             break;
-        default: break;
+        default: hazard_draw(s, e); break;
         }
     }
 }
@@ -1113,6 +1144,7 @@ void render_play(GameState& s) {
     draw_entities(s);
     draw_particles(g);
     draw_player(s);
+    draw_water_front(s.world, g.time);
 
     if (g.fade > 0) srect((float)ox, (float)oy, (float)vw, (float)vh, rgba(0, 0, 0, (int)(g.fade * 255)));
 
@@ -1130,7 +1162,7 @@ void render_play(GameState& s) {
     text_sh((float)ox + 10 * g_ui, (float)oy + 18 * g_ui, rgba(230, 230, 240), font_small(), buf);
 
     // Stars picked up in this room show in yellow until committed.
-    std::snprintf(buf, sizeof(buf), "stars %d/%d", g.star_count + g.pending_count, g.star_total);
+    std::snprintf(buf, sizeof(buf), "plans %d/%d", g.star_count + g.pending_count, g.star_total);
     text_sh((float)ox + 10 * g_ui, (float)oy + 34 * g_ui,
             g.pending_count ? rgba(255, 214, 90) : rgba(230, 230, 240), font_small(), buf);
     if (g.room_banner > 0 && g.room >= 0) {
