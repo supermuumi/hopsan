@@ -54,25 +54,14 @@ Wall jump has two styles, switched with the `wall_jump` console command (F1):
   full air control, so holding toward the wall and tapping jump climbs it.
   Slower wall slide.
 
-## Stars and helpers
+## Stars
 
 Stars (`$` in the editor palette, key 9) are collectibles, counted once per
-save. Each one also gives you a **helper**: a mid-air double jump, spent by
-pressing jump in the air when you have no other jump. You can hold at most
-5; stars collected while full only count as stars.
-
-Anything you collect or spend in a room is provisional until you **leave
-the room or touch a checkpoint**. Die before that and it's undone: the
-star returns and spent helpers are refunded. So you can practise a hard
-section with helpers for free and only pay once you get through. A jump
-pressed just before landing never spends a helper.
-
-The HUD shows the star count (yellow while uncommitted) and helper pips.
-Progress is saved to `progress.txt` next to the engine binary. Every room
-must be beatable without helpers; they only make things easier.
-
-Console: `progress_reset` forgets all stars and helpers, and
-`give_helpers [n]` sets the helper count for testing.
+save. A star you pick up only counts once you **leave the room or touch a
+checkpoint**; die before that and it goes back (like Celeste's
+strawberries). The HUD star count is yellow while a pickup is uncommitted.
+Collected stars show as faint ghosts. Progress is saved to `progress.txt`
+next to the engine binary; `progress_reset` in the console forgets it.
 
 ## The world
 
@@ -146,7 +135,7 @@ back to the built-in placeholder art. The player is still placeholder art.
 On macOS, Cmd works in place of Ctrl. You can only paint inside rooms,
 because tiles outside rooms aren't saved. Console commands: `save`,
 `load`, `restart`, `edit`, `respawn_mode`, `wall_jump`, `progress_reset`,
-`give_helpers`, and `room_name <name>` (renames
+and `room_name <name>` (renames
 the room under the cursor).
 
 ## Engine notes

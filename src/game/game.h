@@ -25,7 +25,7 @@ constexpr const char* kTag = "game";
 // Bump whenever GameState's layout changes so a hot reload re-initialises
 // instead of reading garbage.
 constexpr uint32_t kStateMagic   = 0x484F5053u; // 'HOPS'
-constexpr uint32_t kStateVersion = 4;
+constexpr uint32_t kStateVersion = 5;
 
 // ---- Units ---------------------------------------------------------------
 // World units are pixels of the virtual screen. One tile is kTile pixels.
@@ -69,7 +69,7 @@ enum Tile : uint8_t {
     T_DECOR_CHAIN,   // hangs from the tile's top
     T_DECOR_TORCH,
     T_DECOR_PILLAR,  // two tiles tall, stands on the tile's floor
-    T_STAR,          // collectible: +1 helper, counted once per save
+    T_STAR,          // collectible, counted once per save
     T_COUNT
 };
 
@@ -223,7 +223,6 @@ struct Player {
     float   squash_x, squash_y;
     float   run_anim;
     float   slide_dust;
-    bool    jump_fresh;     // jump was pressed this sim step (not just buffered)
 };
 
 // ---- Input ---------------------------------------------------------------
@@ -241,7 +240,6 @@ struct Actions {
 struct StarPos { int32_t x, y; };   // star tile position
 constexpr int kMaxStars        = 2048;
 constexpr int kMaxPendingStars = 64;
-constexpr int kHelperCap       = 5;
 
 enum WallStyle : uint8_t {
     WALL_CELESTE = 0,   // kick away from the wall; climbing needs grab + stamina
@@ -266,19 +264,14 @@ struct Play {
     uint8_t respawn_mode;
     uint8_t wall_style;
 
-    // Progress: stars + helper double jumps. Anything gained or spent in
-    // the current room is provisional until you leave the room or touch a
-    // checkpoint ("commit"); dying rolls it back.
-    int32_t  helpers;            // double jumps available now
-    int32_t  helpers_committed;
+    // Progress: stars picked up in the current room are provisional until
+    // you leave the room or touch a checkpoint ("commit"); dying rolls
+    // them back.
     int32_t  star_count;         // committed stars
     StarPos  stars[kMaxStars];
     int32_t  pending_count;      // stars picked up in this room, not yet committed
     StarPos  pending[kMaxPendingStars];
     int32_t  star_total;         // stars in the world (cached)
-    float    helper_flash;       // HUD pulse when a helper is spent
-    float    refund_flash;       // HUD note after a death refunded helpers
-    int32_t  refund_amount;
 
     float   cam_x, cam_y;     // top-left of the view, world px
     bool    transitioning;

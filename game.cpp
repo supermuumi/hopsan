@@ -72,15 +72,7 @@ void cmd_progress_reset(int, const char**, void* user) {
     GameState* s = state_of(user);
     progress_reset(*s);
     play_start(*s);
-    logf(LOG_LEVEL_INFO, "progress reset: no stars, no helpers");
-}
-
-void cmd_give_helpers(int argc, const char** argv, void* user) {
-    GameState* s = state_of(user);
-    int n = argc >= 2 ? std::atoi(argv[1]) : kHelperCap;
-    s->play.helpers = s->play.helpers_committed = clampi(n, 0, kHelperCap);
-    progress_save(*s);
-    logf(LOG_LEVEL_INFO, "helpers = %d", s->play.helpers);
+    logf(LOG_LEVEL_INFO, "progress reset: no stars collected");
 }
 
 void cmd_room_name(int argc, const char** argv, void* user) {
@@ -113,8 +105,7 @@ void register_commands(EnginePlatform* platform) {
     platform->console_register("load", cmd_load, "reload the world from disk (drops unsaved edits)");
     platform->console_register("restart", cmd_restart, "start a new run from the start tile");
     platform->console_register("respawn_mode", cmd_respawn_mode, "respawn_mode [room|checkpoint]");
-    platform->console_register("progress_reset", cmd_progress_reset, "forget collected stars + helpers");
-    platform->console_register("give_helpers", cmd_give_helpers, "give_helpers [n] -- set helper count (testing)");
+    platform->console_register("progress_reset", cmd_progress_reset, "forget collected stars");
     platform->console_register("wall_jump", cmd_wall_jump, "wall_jump [celeste|hk] -- wall jump style");
     platform->console_register("room_name", cmd_room_name, "room_name <name> -- rename room under cursor / player");
     platform->console_register("edit", cmd_edit, "toggle the level editor (same as Tab)");

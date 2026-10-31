@@ -23,10 +23,9 @@ of `src/game/*`.
 - Moveset: run, variable jump, coyote + buffer, wall slide / jump, 8-way
   dash (1 charge, refills on ground / crystal / spring), climb with stamina.
   No attacks yet (deliberately).
-- Stars: collectibles, counted once per save; each grants a helper (mid-air
-  double jump, cap `kHelperCap` = 5). Gains / spends in a room commit on
-  leaving the room or touching a checkpoint; death rolls them back.
-  Level design rule: every room must be beatable with zero helpers.
+- Stars: pure collectibles, counted once per save. Pickups in a room commit
+  on leaving the room or touching a checkpoint; death rolls them back.
+  (Helper double jump / charged super jump were tried and shelved.)
 - Level editor is in-game (Tab). Save file: `assets/levels/world.txt`.
 
 ## Target platforms
@@ -44,7 +43,7 @@ it's free.
   POD only, no pointers, so it survives hot reload. Bump `kStateVersion`
   when changing its layout.
 - `src/game/world.cpp` — chunked tile grid, rooms, save / load.
-- `src/game/progress.cpp` — stars + helpers, commit / rollback,
+- `src/game/progress.cpp` — stars, commit / rollback,
   `progress.txt` save file.
 - `src/game/draw.cpp` — view transform, `Quad2D` / text output, atlas
   sprite helpers, tile art (atlas art with procedural fallback).

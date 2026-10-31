@@ -238,7 +238,6 @@ void tile_spawn_pos(int tx, int ty, int* x, int* y) {
 void play_start(GameState& s) {
     Play& g = s.play;
     progress_rollback(s);
-    g.refund_flash = 0;
     g.star_total = count_world_stars(s.world);
     int tx = 0, ty = 0, x = 0, y = 0, room = -1;
     if (find_start(s.world, &tx, &ty)) {
@@ -269,7 +268,7 @@ void respawn(GameState& s) {
     if (room < 0 || room >= s.world.room_count || !s.world.rooms[room].used)
         room = room_at_px(s.world, g.spawn_x + kPlayerW / 2, g.spawn_y + kPlayerH / 2);
     if (room < 0) { play_start(s); return; }
-    progress_rollback(s);   // stars + helpers from this attempt are undone
+    progress_rollback(s);   // stars picked up in this attempt go back
     place_player(s, g.spawn_x, g.spawn_y, room);
 }
 
@@ -513,15 +512,6 @@ void trigger_crumbles_in_box(GameState& s, int x, int y, int w, int h) {
         }
 }
 
-// Ground within a few pixels below? (Then a jump press is a landing
-// buffer, not a reason to spend a helper.)
-bool near_ground(GameState& s) {
-    Player& p = s.play.p;
-    for (int k = 1; k <= 10; ++k)
-        if (collide(s, p.x, p.y + k) || oneway_at(s, p.x, p.y + k)) return true;
-    return false;
-}
-
 void player_update(GameState& s, float dt) {
     Play& g = s.play;
     Player& p = g.p;
@@ -674,21 +664,11 @@ void player_update(GameState& s, float dt) {
                 do_wall_jump(s, -1, a.mx);
             } else if (collide_tiles(s, p.x - kWallJumpCheck, p.y, kPlayerW, kPlayerH)) {
                 do_wall_jump(s, +1, a.mx);
-            } else if (p.jump_fresh && g.helpers > 0 && !near_ground(s)) {
-                // Helper double jump. Only on a fresh press, and not when the
-                // ground is right below (that press is meant for landing).
-                g.helpers--;
-                g.helper_flash = 0.5f;
-                do_jump(s, mx);
-                burst(g, (float)p.x + kPlayerW * 0.5f, (float)(p.y + kPlayerH), 12, 110, 0.4f,
-                      rgba(255, 214, 90), 2);
             }
         }
         break;
     }
     }
-
-    p.jump_fresh = false;
 
     move_x(s, p.vx * dt);
     move_y(s, p.vy * dt);
@@ -840,7 +820,6 @@ void check_interactions(GameState& s) {
             if (e.state == 0 && boxes_overlap(p.x, p.y, kPlayerW, kPlayerH, ex + 2, ey + 2, 12, 12)) {
                 e.state = 1;
                 if (g.pending_count < kMaxPendingStars) g.pending[g.pending_count++] = StarPos{ e.tx, e.ty };
-                g.helpers = imin(kHelperCap, g.helpers + 1);
                 g.freeze = 0.06f;
                 burst(g, ex + 8.0f, ey + 8.0f, 16, 140, 0.5f, rgba(255, 214, 90), 2);
                 burst(g, ex + 8.0f, ey + 8.0f, 8, 60, 0.4f, rgba(255, 255, 255), 2);
@@ -913,14 +892,12 @@ void sim_step(GameState& s) {
     const float dt = kStep;
 
     // Latched presses become buffers so a press is never lost.
-    if (s.act.jump_latched) { p.jump_buffer = kJumpBufferTime; p.jump_fresh = true; s.act.jump_latched = false; }
+    if (s.act.jump_latched) { p.jump_buffer = kJumpBufferTime; s.act.jump_latched = false; }
     if (s.act.dash_latched) { p.dash_buffer = kDashBufferTime; s.act.dash_latched = false; }
 
     g.time += dt;
     g.shake = fmaxf_(0, g.shake - dt);
     g.room_banner = fmaxf_(0, g.room_banner - dt);
-    g.helper_flash = fmaxf_(0, g.helper_flash - dt);
-    g.refund_flash = fmaxf_(0, g.refund_flash - dt);
     update_particles(g, dt);
 
     if (g.freeze > 0) { g.freeze -= dt; return; }
@@ -1152,28 +1129,10 @@ void render_play(GameState& s) {
     std::snprintf(buf, sizeof(buf), "deaths %d   %d:%02d", g.deaths, mins, secs);
     text_sh((float)ox + 10 * g_ui, (float)oy + 18 * g_ui, rgba(230, 230, 240), font_small(), buf);
 
-    // Stars + helper pips. Stars picked up in this room show in yellow
-    // until committed.
+    // Stars picked up in this room show in yellow until committed.
     std::snprintf(buf, sizeof(buf), "stars %d/%d", g.star_count + g.pending_count, g.star_total);
     text_sh((float)ox + 10 * g_ui, (float)oy + 34 * g_ui,
             g.pending_count ? rgba(255, 214, 90) : rgba(230, 230, 240), font_small(), buf);
-    {
-        float pip = 7.0f * g_ui, gap = 3.0f * g_ui;
-        float x0 = (float)ox + 10 * g_ui + 12 * char_w(), y0 = (float)oy + 34 * g_ui - pip + 1;
-        for (int i = 0; i < kHelperCap; ++i) {
-            float x = x0 + (float)i * (pip + gap);
-            bool full = i < g.helpers;
-            bool just_spent = i == g.helpers && g.helper_flash > 0;
-            if (full) srect(x, y0, pip, pip, rgba(255, 214, 90));
-            else if (just_spent) srect(x, y0, pip, pip, rgba(255, 255, 255, (int)(255 * g.helper_flash * 2)));
-            sframe(x, y0, pip, pip, 1, rgba(0, 0, 0, 200));
-        }
-        if (g.refund_flash > 0) {
-            std::snprintf(buf, sizeof(buf), "+%d refunded", g.refund_amount);
-            text_sh(x0 + (float)kHelperCap * (pip + gap) + 6 * g_ui, (float)oy + 34 * g_ui,
-                    with_alpha(rgba(255, 214, 90), clampf(g.refund_flash, 0, 1)), font_small(), buf);
-        }
-    }
     if (g.room_banner > 0 && g.room >= 0) {
         float a = clampf(g.room_banner / 0.4f, 0, 1);
         const char* name = s.world.rooms[g.room].name;
