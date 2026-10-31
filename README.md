@@ -64,7 +64,37 @@ stamina (you flash white when it's about to run out).
 
 Tiles: rock, brick, backdrop (decorative), one-way platform, spikes (lethal
 when you move into them), crumble block, spring, dash crystal, checkpoint,
-walker enemy, and the start marker.
+walker enemy, the start marker, and decorations (grass, fern, mushrooms,
+rubble, vines, chain, torch, pillar). Decorations aren't solid; in the
+editor reach them with Q / E (keys 1-0 cover the first ten brushes).
+
+## Art
+
+All art lives in one atlas, `assets/art/atlas.png`, built from the source
+images in `assets/art/src/`:
+
+| Source | Used for |
+| --- | --- |
+| `rock_fill.webp` | seamless rock texture: rock + brick (tinted) tiles |
+| `back_wall.webp` | seamless backdrop wall texture |
+| `moss_top.png` | seamless moss strip along exposed rock tops |
+| `props_sheet.webp` | spikes, spring, crystal, flag, plank, crumble stone, beetle enemy, decorations |
+
+After changing any source, rebuild with:
+```sh
+pip install pillow numpy
+python3 tools/build_atlas.py
+```
+It snaps each image to a clean pixel grid, removes the magenta background,
+reduces colours, packs the atlas and regenerates `src/game/atlas_data.h`.
+Both outputs are committed. Prop crop rectangles are listed in `PROPS` at
+the top of the script.
+
+Art scale: a tile is 32x32 art pixels (16 world units, so 2 art px per world
+unit). Terrain edges are built at runtime from the textures: an outline +
+shading on exposed sides and moss on exposed tops, so any shape of terrain
+works without hand-made edge tiles. If the atlas is missing the game falls
+back to the built-in placeholder art. The player is still placeholder art.
 
 ## Level editor (Tab)
 
@@ -95,8 +125,11 @@ the room under the cursor).
 - Hot-reloadable game DLL: run `./build.sh game` while the game is running
   and it reloads in place. Game state survives as long as the `GameState`
   layout is unchanged (`kStateVersion` in `src/game/game.h`).
-- The game renders 2D by emitting screen-space `Quad2D` rects plus
-  `HudText` through `RenderCommands` (see `src/shared/engine_api.h`). All
-  art is procedural placeholder for now.
-- The virtual screen is 640x360, scaled by an integer factor and
-  letterboxed for crisp pixels.
+- The game renders 2D by emitting screen-space `Quad2D` rects (solid or
+  textured from an atlas) plus `HudText` through `RenderCommands` (see
+  `src/shared/engine_api.h`). Textured quads use `sprite.frag`, so run
+  `./build.sh shaders` (or `./build.sh`) once after pulling.
+- The view is 640x360 world units = 1280x720 art pixels, scaled and
+  letterboxed. An even scale (art pixels exactly square, e.g. 1280x720 or
+  2560x1440 windows) is preferred; otherwise the nearest integer scale is
+  used (e.g. 1080p: art pixels at 1.5x).

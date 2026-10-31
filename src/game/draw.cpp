@@ -21,17 +21,29 @@ int  font_title() { return g_ui >= 2 ? HUD_FONT_TITLE_2X : HUD_FONT_TITLE; }
 float char_w()    { return 7.0f * (float)g_ui; }   // ProggyClean is monospace
 float line_h()    { return 15.0f * (float)g_ui; }
 
-void push_quad(float x0, float y0, float x1, float y1, uint32_t color) {
+// Emit one screen-space quad, clipped to the view. Clipping a textured
+// quad moves its UVs proportionally so the visible part stays in place.
+void push_quad_uv(float x0, float y0, float x1, float y1,
+                  float u0, float v0, float u1, float v1,
+                  uint32_t color, AssetHandle tex) {
     GameState* s = g_state;
     if ((color >> 24) == 0) return;
-    if (x0 < g_view.clip_x0) x0 = g_view.clip_x0;
-    if (y0 < g_view.clip_y0) y0 = g_view.clip_y0;
-    if (x1 > g_view.clip_x1) x1 = g_view.clip_x1;
-    if (y1 > g_view.clip_y1) y1 = g_view.clip_y1;
+    if (x1 <= x0 || y1 <= y0) return;
+    const float w = x1 - x0, h = y1 - y0;
+    if (x0 < g_view.clip_x0) { u0 += (u1 - u0) * (g_view.clip_x0 - x0) / w; x0 = g_view.clip_x0; }
+    if (x1 > g_view.clip_x1) { u1 -= (u1 - u0) * (x1 - g_view.clip_x1) / (x1 - x0); x1 = g_view.clip_x1; }
+    if (y0 < g_view.clip_y0) { v0 += (v1 - v0) * (g_view.clip_y0 - y0) / h; y0 = g_view.clip_y0; }
+    if (y1 > g_view.clip_y1) { v1 -= (v1 - v0) * (y1 - g_view.clip_y1) / (y1 - y0); y1 = g_view.clip_y1; }
     if (x1 <= x0 || y1 <= y0) return;
     if (s->quad_count >= kMaxQuads) { s->quad_overflow = true; return; }
     Quad2D& q = s->quads[s->quad_count++];
     q.x0 = x0; q.y0 = y0; q.x1 = x1; q.y1 = y1; q.color = color;
+    q.texture = tex;
+    q.u0 = u0; q.v0 = v0; q.u1 = u1; q.v1 = v1;
+}
+
+void push_quad(float x0, float y0, float x1, float y1, uint32_t color) {
+    push_quad_uv(x0, y0, x1, y1, 0, 0, 0, 0, color, 0);
 }
 
 // Screen-space rect (pixels), ignores the view clip.
@@ -53,13 +65,43 @@ void sframe(float x, float y, float w, float h, float t, uint32_t color) {
 float to_sx(float wx) { return g_view.ox + (wx - g_view.cam_x) * g_view.scale; }
 float to_sy(float wy) { return g_view.oy + (wy - g_view.cam_y) * g_view.scale; }
 
+// Round to the art-pixel grid (half world units) in play mode.
+float snapw(float v) { return g_view.snap ? std::floor(v * kArtScale + 0.5f) / kArtScale : v; }
+
 // World-space rect.
 void wrect(float x, float y, float w, float h, uint32_t color) {
-    if (g_view.snap) {
-        x = std::floor(x + 0.5f); y = std::floor(y + 0.5f);
-        w = std::floor(w + 0.5f); h = std::floor(h + 0.5f);
-    }
+    x = snapw(x); y = snapw(y); w = snapw(w); h = snapw(h);
     push_quad(to_sx(x), to_sy(y), to_sx(x + w), to_sy(y + h), color);
+}
+
+// ---- Sprites from the atlas ----------------------------------------------
+
+bool have_art() { return g_state && g_state->atlas != 0; }
+
+// Draw atlas sub-rect (sx, sy, sw, sh) in art px of sprite `id` into the
+// world rect (x, y, w, h). flip_x mirrors horizontally.
+void wsprite_sub(int id, float sx, float sy, float sw, float sh,
+                 float x, float y, float w, float h, uint32_t color = 0xFFFFFFFFu, bool flip_x = false) {
+    const AtlasRect& r = kSprites[id];
+    x = snapw(x); y = snapw(y);
+    float u0 = (r.x + sx) / (float)kAtlasW, u1 = (r.x + sx + sw) / (float)kAtlasW;
+    float v0 = (r.y + sy) / (float)kAtlasH, v1 = (r.y + sy + sh) / (float)kAtlasH;
+    if (flip_x) { float t = u0; u0 = u1; u1 = t; }
+    push_quad_uv(to_sx(x), to_sy(y), to_sx(x + w), to_sy(y + h), u0, v0, u1, v1, color, g_state->atlas);
+}
+
+float spr_w(int id) { return (float)kSprites[id].w / kArtScale; }   // world units
+float spr_h(int id) { return (float)kSprites[id].h / kArtScale; }
+
+// Whole sprite at its natural size with its top-left at (x, y).
+void wsprite(int id, float x, float y, uint32_t color = 0xFFFFFFFFu, bool flip_x = false) {
+    const AtlasRect& r = kSprites[id];
+    wsprite_sub(id, 0, 0, r.w, r.h, x, y, spr_w(id), spr_h(id), color, flip_x);
+}
+
+// Sprite standing on the floor of the tile at (px, py), centred.
+void wsprite_floor(int id, float px, float py, uint32_t color = 0xFFFFFFFFu, bool flip_x = false) {
+    wsprite(id, px + (kTile - spr_w(id)) * 0.5f, py + kTile - spr_h(id), color, flip_x);
 }
 
 // World-space outline whose thickness is in *screen* pixels.
@@ -118,7 +160,63 @@ void tr(float px, float py, float x, float y, float w, float h, uint32_t c) {
     wrect(px + x, py + y, w, h, c);
 }
 
+// Solid tile from the world-aligned rock texture (4x4 tiles per repeat),
+// with an outline + shading on faces that are exposed to air.
+void draw_solid_art(const World& w, int tx, int ty, float px, float py, uint32_t tint) {
+    wsprite_sub(SPR_ROCK, (float)((tx & 3) * 32), (float)((ty & 3) * 32), 32, 32, px, py, kTile, kTile, tint);
+    const float a = 1.0f / kArtScale;   // one art pixel in world units
+    const uint32_t outline = rgba(8, 10, 22);
+    const uint32_t shadow  = rgba(0, 0, 0, 90);
+    const uint32_t light   = rgba(170, 190, 210, 70);
+    bool up    = is_solid_tile(tile_get(w, tx, ty - 1));
+    bool down  = is_solid_tile(tile_get(w, tx, ty + 1));
+    bool left  = is_solid_tile(tile_get(w, tx - 1, ty));
+    bool right = is_solid_tile(tile_get(w, tx + 1, ty));
+    if (!up)    { wrect(px, py, kTile, a, outline); wrect(px, py + a, kTile, a, light); }
+    if (!left)  { wrect(px, py, a, kTile, outline); wrect(px + a, py, a, kTile, light); }
+    if (!right) { wrect(px + kTile - a, py, a, kTile, outline); wrect(px + kTile - 3 * a, py, 2 * a, kTile, shadow); }
+    if (!down)  { wrect(px, py + kTile - a, kTile, a, outline); wrect(px, py + kTile - 3 * a, kTile, 2 * a, shadow); }
+}
+
+// Moss strip along the top of a rock tile (drawn in its own pass so the
+// grass can poke into the tile above).
+void draw_moss_art(int tx, float px, float py) {
+    const AtlasRect& r = kSprites[SPR_MOSS];
+    float h = (float)r.h / kArtScale;
+    wsprite_sub(SPR_MOSS, (float)((tx & 3) * 32), 0, 32, r.h, px, py - (float)kMossBandTop / kArtScale, kTile, h);
+}
+
+void draw_decor(uint8_t t, int tx, int ty, float px, float py) {
+    if (!have_art()) {
+        // Placeholder: a small coloured mark.
+        uint32_t c = kTileInfo[t].color;
+        if (t == T_DECOR_VINES || t == T_DECOR_CHAIN) wrect(px + 6, py, 4, 12, c);
+        else if (t == T_DECOR_PILLAR) wrect(px + 3, py - 16, 10, 32, c);
+        else wrect(px + 3, py + 8, 10, 8, c);
+        return;
+    }
+    bool flip = (hash2(tx, ty) & 1) != 0;
+    switch (t) {
+        case T_DECOR_GRASS:   wsprite_floor(SPR_GRASS, px, py, 0xFFFFFFFFu, flip); break;
+        case T_DECOR_FERN:    wsprite_floor(SPR_FERN, px, py, 0xFFFFFFFFu, flip); break;
+        case T_DECOR_SHROOMS: wsprite_floor(SPR_SHROOMS, px, py, 0xFFFFFFFFu, flip); break;
+        case T_DECOR_RUBBLE:  wsprite_floor(SPR_RUBBLE, px, py, 0xFFFFFFFFu, flip); break;
+        case T_DECOR_PILLAR:  wsprite_floor(SPR_PILLAR, px, py, rgba(200, 205, 215)); break;
+        case T_DECOR_TORCH: {
+            // a little flicker
+            float f = 0.85f + 0.15f * std::sin(g_state->real_time * 13.0f + (float)tx);
+            int v = (int)(255 * f);
+            wsprite_floor(SPR_TORCH, px, py, rgba(255, v, v));
+            break;
+        }
+        case T_DECOR_VINES: wsprite(SPR_VINES, px + (kTile - spr_w(SPR_VINES)) * 0.5f, py, 0xFFFFFFFFu, flip); break;
+        case T_DECOR_CHAIN: wsprite(SPR_CHAIN, px + (kTile - spr_w(SPR_CHAIN)) * 0.5f, py); break;
+        default: break;
+    }
+}
+
 void draw_rock(const World& w, int tx, int ty, float px, float py) {
+    if (have_art()) { draw_solid_art(w, tx, ty, px, py, 0xFFFFFFFFu); return; }
     bool up    = is_solid_tile(tile_get(w, tx, ty - 1));
     bool down  = is_solid_tile(tile_get(w, tx, ty + 1));
     bool left  = is_solid_tile(tile_get(w, tx - 1, ty));
@@ -143,6 +241,7 @@ void draw_rock(const World& w, int tx, int ty, float px, float py) {
 }
 
 void draw_brick(const World& w, int tx, int ty, float px, float py) {
+    if (have_art()) { draw_solid_art(w, tx, ty, px, py, rgba(236, 196, 168)); return; }
     tr(px, py, 0, 0, 16, 16, kBrick);
     tr(px, py, 0, 7, 16, 1, kMortar);
     tr(px, py, 0, 15, 16, 1, kMortar);
@@ -153,6 +252,10 @@ void draw_brick(const World& w, int tx, int ty, float px, float py) {
 }
 
 void draw_backdrop(int tx, int ty, float px, float py) {
+    if (have_art()) {
+        wsprite_sub(SPR_BACKWALL, (float)((tx & 3) * 32), (float)((ty & 3) * 32), 32, 32, px, py, kTile, kTile);
+        return;
+    }
     tr(px, py, 0, 0, 16, 16, kBackdrop);
     uint32_t h = hash2(tx, ty);
     tr(px, py, (float)(h & 15), (float)((h >> 4) & 15), 2, 1, kBackdropD);
@@ -160,6 +263,7 @@ void draw_backdrop(int tx, int ty, float px, float py) {
 }
 
 void draw_oneway(const World& w, int tx, int ty, float px, float py) {
+    if (have_art()) { wsprite(SPR_PLANK, px, py); return; }
     tr(px, py, 0, 0, 16, 3, kPlank);
     tr(px, py, 0, 3, 16, 1, kPlankDark);
     if (tile_get(w, tx - 1, ty) != T_ONEWAY) tr(px, py, 1, 4, 2, 5, kPlankDark);
@@ -177,6 +281,16 @@ void spike_rect(uint8_t t, float px, float py, float u, float v, float du, float
 }
 
 void draw_spikes(uint8_t t, float px, float py, float alpha = 1.0f) {
+    if (have_art()) {
+        uint32_t c = with_alpha(0xFFFFFFFFu, alpha);
+        switch (t) {
+            case T_SPIKE_U: wsprite(SPR_SPIKES_U, px, py + kTile - spr_h(SPR_SPIKES_U), c); break;
+            case T_SPIKE_D: wsprite(SPR_SPIKES_D, px, py, c); break;
+            case T_SPIKE_L: wsprite(SPR_SPIKES_L, px + kTile - spr_w(SPR_SPIKES_L), py, c); break;
+            case T_SPIKE_R: wsprite(SPR_SPIKES_R, px, py, c); break;
+        }
+        return;
+    }
     static const int widths[7] = { 2, 2, 4, 4, 6, 6, 8 };   // tip -> base
     spike_rect(t, px, py, 0, 0, 16, 2, with_alpha(kSteelDark, alpha));
     for (int s = 0; s < 2; ++s) {
@@ -192,6 +306,10 @@ void draw_spikes(uint8_t t, float px, float py, float alpha = 1.0f) {
 }
 
 void draw_crumble(float px, float py, float alpha) {
+    if (have_art()) {
+        wsprite_sub(SPR_STONE, 0, 0, 32, 32, px, py, kTile, kTile, with_alpha(rgba(240, 206, 160), alpha));
+        return;
+    }
     uint32_t c = with_alpha(rgba(196, 156, 104), alpha);
     uint32_t d = with_alpha(rgba(132, 98, 62), alpha);
     tr(px, py, 0, 0, 16, 16, d);
@@ -203,6 +321,12 @@ void draw_crumble(float px, float py, float alpha) {
 }
 
 void draw_spring(float px, float py, float compress) {
+    if (have_art()) {
+        float w = spr_w(SPR_SPRING), h = spr_h(SPR_SPRING) * (1.0f - 0.4f * clampf(compress, 0, 1));
+        const AtlasRect& r = kSprites[SPR_SPRING];
+        wsprite_sub(SPR_SPRING, 0, 0, r.w, r.h, px + (kTile - w) * 0.5f, py + kTile - h, w, h);
+        return;
+    }
     float c = clampf(compress, 0, 1) * 4.0f;
     tr(px, py, 2, 13, 12, 3, rgba(80, 80, 96));
     tr(px, py, 4, 9 + c, 2, 4 - c, rgba(170, 170, 190));
@@ -212,6 +336,11 @@ void draw_spring(float px, float py, float compress) {
 }
 
 void draw_crystal(float px, float py, float bob, bool available) {
+    if (have_art()) {
+        float x = px + (kTile - spr_w(SPR_CRYSTAL)) * 0.5f, y = py + (kTile - spr_h(SPR_CRYSTAL)) * 0.5f + bob;
+        wsprite(SPR_CRYSTAL, x, y, available ? 0xFFFFFFFFu : rgba(120, 160, 200, 70));
+        return;
+    }
     static const int half[12] = { 1, 2, 3, 4, 5, 6, 6, 5, 4, 3, 2, 1 };
     float oy = 2 + bob;
     for (int r = 0; r < 12; ++r) {
@@ -227,6 +356,11 @@ void draw_crystal(float px, float py, float bob, bool available) {
 }
 
 void draw_checkpoint(float px, float py, bool active, float t) {
+    if (have_art()) {
+        uint32_t c = active ? rgba(170, 255, 240) : rgba(150, 120, 130);
+        wsprite(SPR_FLAG, px + 3, py + kTile - spr_h(SPR_FLAG), c);
+        return;
+    }
     tr(px, py, 7, 1, 2, 15, rgba(170, 170, 190));
     tr(px, py, 5, 14, 6, 2, rgba(110, 110, 130));
     uint32_t c = active ? rgba(90, 220, 230) : rgba(150, 72, 80);
@@ -237,6 +371,13 @@ void draw_checkpoint(float px, float py, bool active, float t) {
 }
 
 void draw_walker(float x, float y, int dir, float t) {
+    if (have_art()) {
+        int frame = SPR_BEETLE_0 + (((int)(t * 8.0f)) & 3);
+        // Hitbox 14x12 at (x, y); the beetle stands on the hitbox floor.
+        // Source art faces right.
+        wsprite(frame, x + 7 - spr_w(frame) * 0.5f, y + 12 - spr_h(frame), 0xFFFFFFFFu, dir < 0);
+        return;
+    }
     // Hitbox 14x12 with top-left at (x, y).
     uint32_t body = rgba(150, 70, 176);
     uint32_t dark = rgba(98, 40, 120);
@@ -276,7 +417,16 @@ void draw_tile_static(const World& w, uint8_t t, int tx, int ty, float alpha_ent
         case T_CHECKPOINT: draw_checkpoint(px, py, false, 0); break;
         case T_WALKER:     draw_walker(px + 1, py + 4, 1, 0); break;
         case T_START:      if (alpha_entities > 0) draw_start_marker(px, py); break;
-        default: break;
+        default:
+            if (tile_is_decor(t)) {
+                // A tile holds one thing, so a decoration placed in a
+                // backdrop wall would leave a hole: fill it back in.
+                int bg = (tile_get(w, tx - 1, ty) == T_BG) + (tile_get(w, tx + 1, ty) == T_BG)
+                       + (tile_get(w, tx, ty - 1) == T_BG) + (tile_get(w, tx, ty + 1) == T_BG);
+                if (bg >= 2) draw_backdrop(tx, ty, px, py);
+                draw_decor(t, tx, ty, px, py);
+            }
+            break;
     }
 }
 
@@ -286,20 +436,32 @@ bool tile_is_entity(uint8_t t) {
         || t == T_WALKER || t == T_START;
 }
 
+enum TilePass { PASS_BACK, PASS_SOLID, PASS_MOSS };
+
+// Back pass: backdrop walls + decorations. Solid pass: everything else.
+// Moss pass: moss on exposed rock tops (art only).
+bool tile_in_pass(uint8_t t, int pass) {
+    bool back = t == T_BG || tile_is_decor(t);
+    return pass == PASS_BACK ? back : !back;
+}
+
 // Draw every tile within the visible world rect. `skip_entities` leaves
 // entity tiles to the play-mode entity renderer. At low zoom, tiles are
 // drawn as merged single-colour runs to keep the quad count down.
-void draw_tiles(const World& w, bool skip_entities, bool backdrop_pass) {
+void draw_tiles(const World& w, bool skip_entities, int pass) {
     float wx0 = g_view.cam_x + (g_view.clip_x0 - g_view.ox) / g_view.scale;
     float wy0 = g_view.cam_y + (g_view.clip_y0 - g_view.oy) / g_view.scale;
     float wx1 = g_view.cam_x + (g_view.clip_x1 - g_view.ox) / g_view.scale;
     float wy1 = g_view.cam_y + (g_view.clip_y1 - g_view.oy) / g_view.scale;
+    // Margins: decorations like pillars reach up to 2 tiles above their
+    // tile, vines hang a tile and a half below theirs.
     int tx0 = floordiv((int)std::floor(wx0), kTile) - 1;
-    int ty0 = floordiv((int)std::floor(wy0), kTile) - 1;
+    int ty0 = floordiv((int)std::floor(wy0), kTile) - 2;
     int tx1 = floordiv((int)std::ceil(wx1), kTile) + 1;
-    int ty1 = floordiv((int)std::ceil(wy1), kTile) + 1;
+    int ty1 = floordiv((int)std::ceil(wy1), kTile) + 3;
 
     if (g_view.scale * kTile < 6.0f) {
+        if (pass == PASS_MOSS) return;
         // Low zoom: one quad per run of equal tiles.
         for (int ty = ty0; ty <= ty1; ++ty) {
             int run_start = tx0;
@@ -307,8 +469,7 @@ void draw_tiles(const World& w, bool skip_entities, bool backdrop_pass) {
             for (int tx = tx0 + 1; tx <= tx1 + 1; ++tx) {
                 uint8_t t = tx <= tx1 ? tile_get(w, tx, ty) : 0xFF;
                 if (t == run_t) continue;
-                bool is_bg = run_t == T_BG;
-                if (run_t != T_EMPTY && run_t < T_COUNT && is_bg == backdrop_pass
+                if (run_t != T_EMPTY && run_t < T_COUNT && tile_in_pass(run_t, pass)
                     && !(skip_entities && tile_is_entity(run_t))) {
                     wrect((float)(run_start * kTile), (float)(ty * kTile),
                           (float)((tx - run_start) * kTile), (float)kTile, kTileInfo[run_t].color);
@@ -320,11 +481,20 @@ void draw_tiles(const World& w, bool skip_entities, bool backdrop_pass) {
         return;
     }
 
+    if (pass == PASS_MOSS) {
+        if (!have_art()) return;
+        for (int ty = ty0; ty <= ty1; ++ty)
+            for (int tx = tx0; tx <= tx1; ++tx)
+                if (tile_get(w, tx, ty) == T_ROCK && !is_solid_tile(tile_get(w, tx, ty - 1)))
+                    draw_moss_art(tx, (float)(tx * kTile), (float)(ty * kTile));
+        return;
+    }
+
     for (int ty = ty0; ty <= ty1; ++ty) {
         for (int tx = tx0; tx <= tx1; ++tx) {
             uint8_t t = tile_get(w, tx, ty);
             if (t == T_EMPTY || t >= T_COUNT) continue;
-            if ((t == T_BG) != backdrop_pass) continue;
+            if (!tile_in_pass(t, pass)) continue;
             if (skip_entities && tile_is_entity(t)) continue;
             draw_tile_static(w, t, tx, ty, skip_entities ? 0.0f : 1.0f);
         }

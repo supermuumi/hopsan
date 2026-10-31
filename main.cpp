@@ -336,7 +336,7 @@ int main(int /*argc*/, char** /*argv*/) {
         if (loader.loaded) loader.render(game_memory, &cmds);
 
         engine::ui_renderer_begin_frame(ui, input.window_w, input.window_h);
-        engine::hud_queue(&cmds, ui, input.window_w, input.window_h);
+        engine::hud_queue(&cmds, ui, &assets, input.window_w, input.window_h);
 
         ImGui_ImplSDLGPU3_NewFrame();
         ImGui_ImplSDL3_NewFrame();

@@ -1,5 +1,6 @@
 #include "engine/hud.h"
 #include "engine/ui_renderer.h"
+#include "engine/asset_cache.h"
 
 #include <cstring>
 
@@ -45,7 +46,7 @@ constexpr uint32_t kHudBarBorderColor = 0xDC000000u; // black, alpha=220
 
 } // namespace
 
-void hud_queue(const RenderCommands* cmds, UiRenderer* ui,
+void hud_queue(const RenderCommands* cmds, UiRenderer* ui, const AssetCache* assets,
                int window_w, int window_h) {
     if (!cmds || !ui) return;
 
@@ -53,7 +54,14 @@ void hud_queue(const RenderCommands* cmds, UiRenderer* ui,
     if (cmds->quads) {
         for (int i = 0; i < cmds->quad_count; ++i) {
             const Quad2D& q = cmds->quads[i];
-            ui_renderer_queue_rect(ui, q.x0, q.y0, q.x1 - q.x0, q.y1 - q.y0, q.color);
+            if (q.texture) {
+                const Texture* t = assets ? asset_get_texture(assets, q.texture) : nullptr;
+                if (t && t->gpu)
+                    ui_renderer_queue_textured(ui, t->gpu, assets->sampler, q.x0, q.y0, q.x1, q.y1,
+                                               q.u0, q.v0, q.u1, q.v1, q.color);
+            } else {
+                ui_renderer_queue_rect(ui, q.x0, q.y0, q.x1 - q.x0, q.y1 - q.y0, q.color);
+            }
         }
     }
 

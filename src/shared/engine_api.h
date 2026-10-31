@@ -137,12 +137,17 @@ struct HudText {
     int      font;   // index into the host's UI font list (0 = ProggyClean 13px)
 };
 
-// Screen-space solid rectangle in window pixels, drawn by the UI renderer
-// before HUD panels + text. (x0, y0) top-left, (x1, y1) bottom-right.
-// Used by 2D games that do their own world -> screen transform.
+// Screen-space rectangle in window pixels, drawn by the UI renderer before
+// HUD panels + text. (x0, y0) top-left, (x1, y1) bottom-right. Used by 2D
+// games that do their own world -> screen transform.
+//   texture == 0: solid `color`.
+//   texture != 0: samples the texture (nearest) over (u0,v0)-(u1,v1) and
+//                 multiplies by `color`. uv may be flipped (u1 < u0).
 struct Quad2D {
-    float    x0, y0, x1, y1;
-    uint32_t color;    // IM_COL32-packed ABGR (low byte R)
+    float       x0, y0, x1, y1;
+    uint32_t    color;    // IM_COL32-packed ABGR (low byte R)
+    AssetHandle texture;
+    float       u0, v0, u1, v1;
 };
 
 constexpr int kMaxHudBars   = 32;

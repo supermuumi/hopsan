@@ -19,6 +19,8 @@ namespace hop {
 constexpr uint8_t kPalette[] = {
     T_ROCK, T_BRICK, T_BG, T_ONEWAY, T_SPIKE_U, T_CRUMBLE,
     T_SPRING, T_CRYSTAL, T_CHECKPOINT, T_WALKER, T_START,
+    T_DECOR_GRASS, T_DECOR_FERN, T_DECOR_SHROOMS, T_DECOR_RUBBLE,
+    T_DECOR_VINES, T_DECOR_CHAIN, T_DECOR_TORCH, T_DECOR_PILLAR,
 };
 constexpr int kPaletteN = (int)(sizeof(kPalette) / sizeof(kPalette[0]));
 
@@ -582,6 +584,7 @@ void draw_palette_item(int i, float x, float y, float sz, bool selected, uint8_t
     uint8_t t = kPalette[i];
     if (t == T_SPIKE_U && spike_dir) t = spike_dir;
     draw_tile_static(g_state->world, t, far_tx, far_ty, 1.0f);
+    if (t == T_ROCK && have_art()) draw_moss_art(far_tx, (float)(far_tx * kTile), (float)(far_ty * kTile));
     g_view = saved;
     char num[4];
     std::snprintf(num, sizeof(num), "%d", (i + 1) % 10);
@@ -630,8 +633,9 @@ void render_editor(GameState& s) {
         }
     }
 
-    draw_tiles(s.world, false, true);
-    draw_tiles(s.world, false, false);
+    draw_tiles(s.world, false, PASS_BACK);
+    draw_tiles(s.world, false, PASS_SOLID);
+    draw_tiles(s.world, false, PASS_MOSS);
 
     // Room outlines + names.
     for (int i = 0; i < s.world.room_count; ++i) {
@@ -749,7 +753,7 @@ void render_editor(GameState& s) {
             "LMB / RMB   paint / erase",
             "Shift+drag  fill / erase rectangle",
             "Alt+click   pick tile",
-            "1-9,0 Q/E   choose brush",
+            "1-9,0 Q/E   choose brush (Q/E: decor)",
             "T           spike direction",
             "R           room mode on/off",
             "  drag      create / move / resize",

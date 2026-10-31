@@ -25,12 +25,13 @@ constexpr const char* kTag = "game";
 // Bump whenever GameState's layout changes so a hot reload re-initialises
 // instead of reading garbage.
 constexpr uint32_t kStateMagic   = 0x484F5053u; // 'HOPS'
-constexpr uint32_t kStateVersion = 1;
+constexpr uint32_t kStateVersion = 2;
 
 // ---- Units ---------------------------------------------------------------
 // World units are pixels of the virtual screen. One tile is kTile pixels.
 
 constexpr int   kTile      = 16;
+constexpr int   kArtScale  = 2;     // art pixels per world unit (32px tile art)
 constexpr int   kViewW     = 640;   // virtual screen, in world pixels
 constexpr int   kViewH     = 360;
 constexpr float kStep      = 1.0f / 60.0f;
@@ -59,6 +60,15 @@ enum Tile : uint8_t {
     T_CHECKPOINT,  // respawn point
     T_WALKER,      // enemy: patrols left / right, turns at walls + ledges
     T_START,       // where a new game begins (one per world)
+    // Decorations: not solid, drawn behind the player.
+    T_DECOR_GRASS,
+    T_DECOR_FERN,
+    T_DECOR_SHROOMS,
+    T_DECOR_RUBBLE,
+    T_DECOR_VINES,   // hangs from the tile's top
+    T_DECOR_CHAIN,   // hangs from the tile's top
+    T_DECOR_TORCH,
+    T_DECOR_PILLAR,  // two tiles tall, stands on the tile's floor
     T_COUNT
 };
 
@@ -88,9 +98,18 @@ constexpr TileInfo kTileInfo[T_COUNT] = {
     { 'C', "checkpoint", rgba(90, 220, 230)      },
     { 'E', "walker",     rgba(170, 80, 190)      },
     { '@', "start",      rgba(255, 255, 255)     },
+    { 'g', "grass",      rgba(90, 160, 80, 160)  },
+    { 'f', "fern",       rgba(60, 130, 70, 160)  },
+    { 'm', "mushrooms",  rgba(190, 120, 90, 160) },
+    { 'r', "rubble",     rgba(80, 86, 110, 160)  },
+    { '~', "vines",      rgba(80, 150, 70, 160)  },
+    { '|', "chain",      rgba(120, 120, 130, 160)},
+    { 't', "torch",      rgba(255, 170, 60, 200) },
+    { 'p', "pillar",     rgba(70, 84, 104, 160)  },
 };
 
 inline bool tile_is_spike(uint8_t t) { return t >= T_SPIKE_U && t <= T_SPIKE_R; }
+inline bool tile_is_decor(uint8_t t) { return t >= T_DECOR_GRASS && t <= T_DECOR_PILLAR; }
 
 // ---- World storage -------------------------------------------------------
 // Tiles live in one global sparse grid of 32x32 chunks so rooms can sit
@@ -334,6 +353,7 @@ struct GameState {
 
     uint8_t  mode;
     uint64_t frame;
+    AssetHandle atlas;   // assets/art/atlas.png, 0 = procedural fallback art
     float    real_time;
 
     // Latest frame's raw input (render reads window size / mouse from it).

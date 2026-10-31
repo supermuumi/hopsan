@@ -92,7 +92,8 @@ struct UiFont {
 
 struct UiRenderer {
     SDL_GPUDevice*           gpu              = nullptr;
-    SDL_GPUGraphicsPipeline* pipeline         = nullptr;
+    SDL_GPUGraphicsPipeline* pipeline         = nullptr;   // font atlas (R8 alpha)
+    SDL_GPUGraphicsPipeline* sprite_pipeline  = nullptr;   // RGBA textures
     SDL_GPUTexture*          atlas_tex        = nullptr;
     SDL_GPUSampler*          atlas_sampler    = nullptr;
 
@@ -114,6 +115,18 @@ struct UiRenderer {
     UiFont                   fonts[kMaxFonts];
     int                      font_count       = 0;
 
+    // Draw batches: consecutive quads sharing a texture. tex == nullptr
+    // means the font atlas (text + solid rects).
+    struct Batch {
+        SDL_GPUTexture* tex;
+        SDL_GPUSampler* smp;
+        uint32_t        first_index;
+        uint32_t        index_count;
+    };
+    Batch*                   batches          = nullptr;
+    int                      batch_count      = 0;
+    int                      batch_cap        = 0;
+
     // Single white pixel reserved for untextured quads.
     float                    white_u          = 0.0f;
     float                    white_v          = 0.0f;
@@ -121,13 +134,18 @@ struct UiRenderer {
 
 namespace {
 
-bool create_pipeline(UiRenderer* r, SDL_GPUTextureFormat swap_fmt, const char* shader_dir) {
+SDL_GPUGraphicsPipeline* create_pipeline(UiRenderer* r, SDL_GPUTextureFormat swap_fmt,
+                                         const char* shader_dir, const char* frag_name) {
     char vsp[256], fsp[256];
     std::snprintf(vsp, sizeof(vsp), "%s/ui.vert", shader_dir);
-    std::snprintf(fsp, sizeof(fsp), "%s/ui.frag", shader_dir);
+    std::snprintf(fsp, sizeof(fsp), "%s/%s", shader_dir, frag_name);
     SDL_GPUShader* vs = load_shader(r->gpu, vsp, SDL_GPU_SHADERSTAGE_VERTEX,   1, 0);
     SDL_GPUShader* fs = load_shader(r->gpu, fsp, SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 1);
-    if (!vs || !fs) return false;
+    if (!vs || !fs) {
+        if (vs) SDL_ReleaseGPUShader(r->gpu, vs);
+        if (fs) SDL_ReleaseGPUShader(r->gpu, fs);
+        return nullptr;
+    }
 
     SDL_GPUVertexBufferDescription vb_desc{};
     vb_desc.slot       = 0;
@@ -169,14 +187,11 @@ bool create_pipeline(UiRenderer* r, SDL_GPUTextureFormat swap_fmt, const char* s
     gpci.target_info.num_color_targets         = 1;
     gpci.target_info.has_depth_stencil_target  = false;
 
-    r->pipeline = SDL_CreateGPUGraphicsPipeline(r->gpu, &gpci);
+    SDL_GPUGraphicsPipeline* pipe = SDL_CreateGPUGraphicsPipeline(r->gpu, &gpci);
     SDL_ReleaseGPUShader(r->gpu, vs);
     SDL_ReleaseGPUShader(r->gpu, fs);
-    if (!r->pipeline) {
-        LOG_ERROR(kTag, "ui pipeline create: %s", SDL_GetError());
-        return false;
-    }
-    return true;
+    if (!pipe) LOG_ERROR(kTag, "ui pipeline (%s) create: %s", frag_name, SDL_GetError());
+    return pipe;
 }
 
 bool create_atlas(UiRenderer* r, const UiFontSpec* fonts, int font_count) {
@@ -325,8 +340,18 @@ void grow_cpu_buffers(UiRenderer* r, int need_verts, int need_indices) {
 void emit_quad(UiRenderer* r,
                float x0, float y0, float x1, float y1,
                float u0, float v0, float u1, float v1,
-               uint32_t color) {
+               uint32_t color,
+               SDL_GPUTexture* tex = nullptr, SDL_GPUSampler* smp = nullptr) {
     grow_cpu_buffers(r, r->vert_count + 4, r->index_count + 6);
+    if (r->batch_count == 0 || r->batches[r->batch_count - 1].tex != tex
+        || r->batches[r->batch_count - 1].smp != smp) {
+        if (r->batch_count >= r->batch_cap) {
+            r->batch_cap = r->batch_cap ? r->batch_cap * 2 : 64;
+            r->batches = (UiRenderer::Batch*)std::realloc(r->batches, (size_t)r->batch_cap * sizeof(UiRenderer::Batch));
+        }
+        r->batches[r->batch_count++] = UiRenderer::Batch{ tex, smp, (uint32_t)r->index_count, 0 };
+    }
+    r->batches[r->batch_count - 1].index_count += 6;
     const uint32_t base = (uint32_t)r->vert_count;
     UIVertex* v = &r->verts[r->vert_count];
     v[0] = { x0, y0, u0, v0, color };
@@ -379,7 +404,11 @@ UiRenderer* ui_renderer_create(SDL_GPUDevice* gpu, SDL_GPUTextureFormat swap_fmt
     auto* r = new UiRenderer();
     r->gpu = gpu;
     if (!create_atlas(r, fonts, font_count)) { ui_renderer_destroy(r); return nullptr; }
-    if (!create_pipeline(r, swap_fmt, shader_dir)) { ui_renderer_destroy(r); return nullptr; }
+    r->pipeline = create_pipeline(r, swap_fmt, shader_dir, "ui.frag");
+    if (!r->pipeline) { ui_renderer_destroy(r); return nullptr; }
+    // Textured sprites are optional: without the shader we just skip them.
+    r->sprite_pipeline = create_pipeline(r, swap_fmt, shader_dir, "sprite.frag");
+    if (!r->sprite_pipeline) LOG_WARN(kTag, "sprite pipeline unavailable -- run ./build.sh shaders");
     char fonts_summary[256] = {};
     for (int i = 0; i < font_count; ++i) {
         std::snprintf(fonts_summary + std::strlen(fonts_summary),
@@ -399,6 +428,8 @@ void ui_renderer_destroy(UiRenderer* r) {
     if (r->atlas_tex)     SDL_ReleaseGPUTexture(r->gpu, r->atlas_tex);
     if (r->atlas_sampler) SDL_ReleaseGPUSampler(r->gpu, r->atlas_sampler);
     if (r->pipeline)      SDL_ReleaseGPUGraphicsPipeline(r->gpu, r->pipeline);
+    if (r->sprite_pipeline) SDL_ReleaseGPUGraphicsPipeline(r->gpu, r->sprite_pipeline);
+    std::free(r->batches);
     std::free(r->verts);
     std::free(r->indices);
     delete r;
@@ -407,6 +438,7 @@ void ui_renderer_destroy(UiRenderer* r) {
 void ui_renderer_begin_frame(UiRenderer* r, int window_w, int window_h) {
     r->vert_count  = 0;
     r->index_count = 0;
+    r->batch_count = 0;
     r->window_w    = (float)window_w;
     r->window_h    = (float)window_h;
 }
@@ -414,6 +446,13 @@ void ui_renderer_begin_frame(UiRenderer* r, int window_w, int window_h) {
 void ui_renderer_queue_rect(UiRenderer* r, float x, float y, float w, float h, uint32_t color) {
     if (w <= 0 || h <= 0) return;
     emit_quad(r, x, y, x + w, y + h, r->white_u, r->white_v, r->white_u, r->white_v, color);
+}
+
+void ui_renderer_queue_textured(UiRenderer* r, SDL_GPUTexture* tex, SDL_GPUSampler* smp,
+                                float x0, float y0, float x1, float y1,
+                                float u0, float v0, float u1, float v1, uint32_t color) {
+    if (!tex || !smp || !r->sprite_pipeline || x1 <= x0 || y1 <= y0) return;
+    emit_quad(r, x0, y0, x1, y1, u0, v0, u1, v1, color, tex, smp);
 }
 
 float ui_renderer_queue_text(UiRenderer* r, int font_id, float x, float y,
@@ -482,24 +521,31 @@ void ui_renderer_draw(UiRenderer* r, SDL_GPUCommandBuffer* cmd, SDL_GPURenderPas
     if (r->vert_count == 0 || r->index_count == 0) return;
     if (r->window_w <= 0 || r->window_h <= 0)      return;
 
-    SDL_BindGPUGraphicsPipeline(pass, r->pipeline);
-
     float inv_size[2] = { 1.0f / r->window_w, 1.0f / r->window_h };
-    SDL_PushGPUVertexUniformData(cmd, 0, inv_size, sizeof(inv_size));
 
     SDL_GPUBufferBinding vb{};
     vb.buffer = r->vbo;
-    SDL_BindGPUVertexBuffers(pass, 0, &vb, 1);
     SDL_GPUBufferBinding ib{};
     ib.buffer = r->ibo;
-    SDL_BindGPUIndexBuffer(pass, &ib, SDL_GPU_INDEXELEMENTSIZE_32BIT);
 
-    SDL_GPUTextureSamplerBinding tsb{};
-    tsb.texture = r->atlas_tex;
-    tsb.sampler = r->atlas_sampler;
-    SDL_BindGPUFragmentSamplers(pass, 0, &tsb, 1);
-
-    SDL_DrawGPUIndexedPrimitives(pass, (uint32_t)r->index_count, 1, 0, 0, 0);
+    SDL_GPUGraphicsPipeline* bound = nullptr;
+    for (int i = 0; i < r->batch_count; ++i) {
+        const UiRenderer::Batch& b = r->batches[i];
+        SDL_GPUGraphicsPipeline* pipe = b.tex ? r->sprite_pipeline : r->pipeline;
+        if (!pipe || b.index_count == 0) continue;
+        if (pipe != bound) {
+            SDL_BindGPUGraphicsPipeline(pass, pipe);
+            SDL_PushGPUVertexUniformData(cmd, 0, inv_size, sizeof(inv_size));
+            SDL_BindGPUVertexBuffers(pass, 0, &vb, 1);
+            SDL_BindGPUIndexBuffer(pass, &ib, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+            bound = pipe;
+        }
+        SDL_GPUTextureSamplerBinding tsb{};
+        tsb.texture = b.tex ? b.tex : r->atlas_tex;
+        tsb.sampler = b.tex ? b.smp : r->atlas_sampler;
+        SDL_BindGPUFragmentSamplers(pass, 0, &tsb, 1);
+        SDL_DrawGPUIndexedPrimitives(pass, b.index_count, 1, b.first_index, 0, 0);
+    }
 }
 
 } // namespace engine

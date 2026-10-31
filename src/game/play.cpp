@@ -1039,7 +1039,14 @@ void draw_void_outside(const World& w, int ri, uint32_t color) {
 void render_play(GameState& s) {
     Play& g = s.play;
     const int W = s.in.window_w, H = s.in.window_h;
-    int scale = (int)fmaxf_(1.0f, std::floor(fminf_((float)W / kViewW, (float)H / kViewH)));
+    // Screen px per world unit. Art has 2 art px per world unit, so an even
+    // scale keeps art pixels perfectly square; take the largest even scale
+    // unless that would waste more than ~15% of the window, in which case
+    // use the largest integer scale (art pixels become 1.5x etc).
+    float fit = fminf_((float)W / kViewW, (float)H / kViewH);
+    int scale = (int)fmaxf_(1.0f, std::floor(fit));
+    int even = ((int)std::floor(fit) / 2) * 2;
+    if (even >= 2 && (float)even >= fit * 0.85f) scale = even;
     int vw = kViewW * scale, vh = kViewH * scale;
     int ox = (W - vw) / 2, oy = (H - vh) / 2;
 
@@ -1064,8 +1071,9 @@ void render_play(GameState& s) {
 
     if (g.room >= 0 && !g.transitioning) draw_void_outside(s.world, g.room, rgba(12, 10, 20));
 
-    draw_tiles(s.world, true, true);    // backdrop
-    draw_tiles(s.world, true, false);   // solids, platforms, spikes
+    draw_tiles(s.world, true, PASS_BACK);    // backdrop + decorations
+    draw_tiles(s.world, true, PASS_SOLID);   // solids, platforms, spikes
+    draw_tiles(s.world, true, PASS_MOSS);
     draw_entities(s);
     draw_particles(g);
     draw_player(s);

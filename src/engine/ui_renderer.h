@@ -39,6 +39,13 @@ void        ui_renderer_begin_frame(UiRenderer* r, int window_w, int window_h);
 void        ui_renderer_queue_rect(UiRenderer* r, float x, float y,
                                    float w, float h, uint32_t color);
 
+// Textured quad from an RGBA texture (e.g. a sprite atlas), multiplied by
+// `color`. Drawn in queue order with everything else. No-op if the sprite
+// shader isn't available.
+void        ui_renderer_queue_textured(UiRenderer* r, SDL_GPUTexture* tex, SDL_GPUSampler* smp,
+                                       float x0, float y0, float x1, float y1,
+                                       float u0, float v0, float u1, float v1, uint32_t color);
+
 // Text run at baseline (x, y) in `font_id`. Returns the resulting x in
 // pixels so the caller can stack runs. ASCII 32..126 only.
 float       ui_renderer_queue_text(UiRenderer* r, int font_id,
