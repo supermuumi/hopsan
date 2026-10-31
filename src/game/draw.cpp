@@ -392,6 +392,38 @@ void draw_walker(float x, float y, int dir, float t) {
     wrect(ex + (dir > 0 ? 2 : 0), y + 4, 2, 2, rgba(20, 16, 30));
 }
 
+// Pixel star, 13x11 "star pixels" of 1 world unit each.
+void draw_star(float px, float py, float bob, bool ghost) {
+    static const char* rows[11] = {
+        "......#......",
+        ".....###.....",
+        ".....###.....",
+        "#############",
+        ".###########.",
+        "..#########..",
+        "...#######...",
+        "...#######...",
+        "..####.####..",
+        "..###...###..",
+        ".##.......##.",
+    };
+    float ox = px + 1.5f, oy = py + 2.5f + bob;
+    uint32_t lit = ghost ? rgba(255, 230, 150, 60) : rgba(255, 226, 110);
+    uint32_t dim = ghost ? rgba(255, 230, 150, 60) : rgba(226, 150, 40);
+    for (int r = 0; r < 11; ++r) {
+        int c = 0;
+        while (c < 13) {
+            if (rows[r][c] != '#') { ++c; continue; }
+            int start = c;
+            while (c < 13 && rows[r][c] == '#') ++c;
+            // left half lit, right half shaded
+            int mid = imax(start, imin(c, 7));
+            if (mid > start) wrect(ox + start, oy + r, (float)(mid - start), 1, lit);
+            if (c > mid) wrect(ox + mid, oy + r, (float)(c - mid), 1, dim);
+        }
+    }
+}
+
 void draw_start_marker(float px, float py) {
     // Ghost of the player standing on this tile's floor.
     float x = px + (16 - kPlayerW) * 0.5f;
@@ -417,6 +449,7 @@ void draw_tile_static(const World& w, uint8_t t, int tx, int ty, float alpha_ent
         case T_CHECKPOINT: draw_checkpoint(px, py, false, 0); break;
         case T_WALKER:     draw_walker(px + 1, py + 4, 1, 0); break;
         case T_START:      if (alpha_entities > 0) draw_start_marker(px, py); break;
+        case T_STAR:       draw_star(px, py, 0, false); break;
         default:
             if (tile_is_decor(t)) {
                 // A tile holds one thing, so a decoration placed in a
@@ -433,7 +466,7 @@ void draw_tile_static(const World& w, uint8_t t, int tx, int ty, float alpha_ent
 // Tiles that become runtime entities in play mode.
 bool tile_is_entity(uint8_t t) {
     return t == T_CRUMBLE || t == T_SPRING || t == T_CRYSTAL || t == T_CHECKPOINT
-        || t == T_WALKER || t == T_START;
+        || t == T_WALKER || t == T_START || t == T_STAR;
 }
 
 enum TilePass { PASS_BACK, PASS_SOLID, PASS_MOSS };

@@ -15,6 +15,7 @@
 #include "game/atlas_data.h"
 
 #include "game/world.cpp"
+#include "game/progress.cpp"
 #include "game/draw.cpp"
 #include "game/play.cpp"
 #include "game/editor.cpp"
@@ -67,6 +68,21 @@ void cmd_wall_jump(int argc, const char** argv, void* user) {
          : "celeste (kick away; climb with grab + stamina)");
 }
 
+void cmd_progress_reset(int, const char**, void* user) {
+    GameState* s = state_of(user);
+    progress_reset(*s);
+    play_start(*s);
+    logf(LOG_LEVEL_INFO, "progress reset: no stars, no helpers");
+}
+
+void cmd_give_helpers(int argc, const char** argv, void* user) {
+    GameState* s = state_of(user);
+    int n = argc >= 2 ? std::atoi(argv[1]) : kHelperCap;
+    s->play.helpers = s->play.helpers_committed = clampi(n, 0, kHelperCap);
+    progress_save(*s);
+    logf(LOG_LEVEL_INFO, "helpers = %d", s->play.helpers);
+}
+
 void cmd_room_name(int argc, const char** argv, void* user) {
     GameState* s = state_of(user);
     int ri = -1;
@@ -97,6 +113,8 @@ void register_commands(EnginePlatform* platform) {
     platform->console_register("load", cmd_load, "reload the world from disk (drops unsaved edits)");
     platform->console_register("restart", cmd_restart, "start a new run from the start tile");
     platform->console_register("respawn_mode", cmd_respawn_mode, "respawn_mode [room|checkpoint]");
+    platform->console_register("progress_reset", cmd_progress_reset, "forget collected stars + helpers");
+    platform->console_register("give_helpers", cmd_give_helpers, "give_helpers [n] -- set helper count (testing)");
     platform->console_register("wall_jump", cmd_wall_jump, "wall_jump [celeste|hk] -- wall jump style");
     platform->console_register("room_name", cmd_room_name, "room_name <name> -- rename room under cursor / player");
     platform->console_register("edit", cmd_edit, "toggle the level editor (same as Tab)");
@@ -139,6 +157,7 @@ GAME_EXPORT void game_init(void* memory, size_t size, EnginePlatform* platform) 
     s->ed.grid = true;
     s->ed.help = true;
     s->mode = MODE_PLAY;
+    progress_load(*s);
     play_start(*s);
     logf(LOG_LEVEL_INFO, "game initialised (%zu KB state)", sizeof(GameState) / 1024);
 }

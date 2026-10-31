@@ -18,7 +18,7 @@ namespace hop {
 
 constexpr uint8_t kPalette[] = {
     T_ROCK, T_BRICK, T_BG, T_ONEWAY, T_SPIKE_U, T_CRUMBLE,
-    T_SPRING, T_CRYSTAL, T_CHECKPOINT, T_WALKER, T_START,
+    T_SPRING, T_CRYSTAL, T_STAR, T_CHECKPOINT, T_WALKER, T_START,
     T_DECOR_GRASS, T_DECOR_FERN, T_DECOR_SHROOMS, T_DECOR_RUBBLE,
     T_DECOR_VINES, T_DECOR_CHAIN, T_DECOR_TORCH, T_DECOR_PILLAR,
 };
@@ -274,6 +274,7 @@ void editor_exit(GameState& s, bool at_cursor) {
         g.has_checkpoint = false;
         g.spawn_wants_ground = true;
         g.dying = false; g.fade = 0; g.transitioning = false;
+        progress_rollback(s);   // a playtest jump doesn't keep this room's pickups
         place_player(s, x, y, room);
     } else {
         int room = room_at_px(s.world, g.p.x + kPlayerW / 2, g.p.y + kPlayerH / 2);
@@ -285,6 +286,7 @@ void editor_exit(GameState& s, bool at_cursor) {
             snap_camera(s);
         }
     }
+    g.star_total = count_world_stars(s.world);
     // Swallow presses that happened while editing.
     s.act.jump_latched = s.act.dash_latched = false;
     s.mode = MODE_PLAY;
