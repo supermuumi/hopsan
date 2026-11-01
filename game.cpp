@@ -96,6 +96,77 @@ void cmd_hole(int argc, const char** argv, void* user) {
     logf(LOG_LEVEL_INFO, "hole %d (target %d)", s->play.hole, s->play.hole_target);
 }
 
+// flag_new <name>: take the first unused flag, name it, select it as the brush.
+void cmd_flag_new(int argc, const char** argv, void* user) {
+    GameState* s = state_of(user);
+    if (argc < 2) { logf(LOG_LEVEL_WARN, "usage: flag_new <name>"); return; }
+    if (find_flag(s->world, argv[1])) { logf(LOG_LEVEL_WARN, "flag '%s' already exists", argv[1]); return; }
+    for (int f = 1; f <= kMaxFlags; ++f) {
+        if (s->world.flag_names[f][0]) continue;
+        bool used = false;   // also skip numbers already used by tiles / rooms
+        for (int r = 0; r < s->world.room_count && !used; ++r)
+            if (s->world.rooms[r].used && room_flag_refs(*s, r, f) > 0) used = true;
+        if (used) continue;
+        std::snprintf(s->world.flag_names[f], sizeof(s->world.flag_names[f]), "%s", argv[1]);
+        s->ed.flag_brush = (uint8_t)f;
+        s->ed.flag_panel_timer = 4;
+        s->ed.dirty = true;
+        logf(LOG_LEVEL_INFO, "new flag %s (selected as the brush flag; save with Ctrl+S)", flag_label(s->world, f));
+        return;
+    }
+    logf(LOG_LEVEL_WARN, "all %d flags are in use", kMaxFlags);
+}
+
+// flag_name <n> <name>
+void cmd_flag_name(int argc, const char** argv, void* user) {
+    GameState* s = state_of(user);
+    int f = argc >= 2 ? find_flag(s->world, argv[1]) : 0;
+    if (!f || argc < 3) { logf(LOG_LEVEL_WARN, "usage: flag_name <n|name> <new name>"); return; }
+    std::snprintf(s->world.flag_names[f], sizeof(s->world.flag_names[f]), "%s", argv[2]);
+    s->ed.dirty = true;
+    logf(LOG_LEVEL_INFO, "flag %s (save with Ctrl+S)", flag_label(s->world, f));
+}
+
+// flags: list named / used flags, whether they're set, and where they're used.
+void cmd_flags(int, const char**, void* user) {
+    GameState* s = state_of(user);
+    int shown = 0;
+    for (int f = 1; f <= kMaxFlags; ++f) {
+        char rooms[160] = "";
+        for (int r = 0; r < s->world.room_count; ++r) {
+            if (!s->world.rooms[r].used) continue;
+            const Room& rm = s->world.rooms[r];
+            bool sets = false, uses = room_flag_refs(*s, r, f) > 0;
+            for (int y = rm.y; y < rm.y + rm.h && !sets; ++y)
+                for (int x = rm.x; x < rm.x + rm.w && !sets; ++x)
+                    if (cond_is_target(tile_raw(s->world, x, y)) && cond_flag(tile_cond(s->world, x, y)) == f) sets = true;
+            if (!sets && !uses) continue;
+            size_t n = std::strlen(rooms);
+            std::snprintf(rooms + n, sizeof(rooms) - n, "%s%s%s", n ? ", " : "", rm.name, sets ? " (sets)" : "");
+        }
+        if (!s->world.flag_names[f][0] && !rooms[0]) continue;
+        ++shown;
+        logf(LOG_LEVEL_INFO, "%-22s %s  %s", flag_label(s->world, f), flag_is_set(s->play, f) ? "SET  " : "unset",
+             rooms[0] ? rooms : "(unused)");
+    }
+    if (!shown) logf(LOG_LEVEL_INFO, "no flags yet -- flag_new <name> makes one");
+}
+
+// flag <n|name> [on|off]: inspect or force a flag (testing).
+void cmd_flag(int argc, const char** argv, void* user) {
+    GameState* s = state_of(user);
+    int f = argc >= 2 ? find_flag(s->world, argv[1]) : 0;
+    if (!f) { logf(LOG_LEVEL_WARN, "usage: flag <n|name> [on|off]"); return; }
+    if (argc >= 3 && std::strcmp(argv[2], "on") == 0) flag_set(*s, f);
+    else if (argc >= 3 && std::strcmp(argv[2], "off") == 0) {
+        s->play.flags &= ~(1u << f);
+        s->world.gate_flags = s->play.flags;
+        progress_save(*s);
+        if (s->play.room >= 0) build_entities(*s, s->play.room);
+    }
+    logf(LOG_LEVEL_INFO, "flag %s is %s", flag_label(s->world, f), flag_is_set(s->play, f) ? "set" : "not set");
+}
+
 void cmd_room_name(int argc, const char** argv, void* user) {
     GameState* s = state_of(user);
     int ri = -1;
@@ -128,6 +199,10 @@ void register_commands(EnginePlatform* platform) {
     platform->console_register("respawn_mode", cmd_respawn_mode, "respawn_mode [room|checkpoint]");
     platform->console_register("progress_reset", cmd_progress_reset, "forget collected stars");
     platform->console_register("hole", cmd_hole, "hole [n] -- jump the golf clock to hole n (testing)");
+    platform->console_register("flag_new", cmd_flag_new, "flag_new <name> -- new named flag, selected as the brush");
+    platform->console_register("flag_name", cmd_flag_name, "flag_name <n|name> <new name>");
+    platform->console_register("flags", cmd_flags, "list flags: name, set?, rooms that use / set them");
+    platform->console_register("flag", cmd_flag, "flag <n|name> [on|off] -- inspect or force a flag");
     platform->console_register("wall_jump", cmd_wall_jump, "wall_jump [celeste|hk] -- wall jump style");
     platform->console_register("room_name", cmd_room_name, "room_name <name> -- rename room under cursor / player");
     platform->console_register("edit", cmd_edit, "toggle the level editor (same as Tab)");

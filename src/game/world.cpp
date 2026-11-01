@@ -126,6 +126,29 @@ void world_clear(World& w) {
     w.map.count = 0;
     w.room_count = 0;
     std::memset(w.rooms, 0, sizeof(w.rooms));
+    std::memset(w.flag_names, 0, sizeof(w.flag_names));
+}
+
+// "3 lab_solved" (or "3" if unnamed), for UI and logs.
+const char* flag_label(const World& w, int f) {
+    static char buf[4][40];
+    static int slot = 0;
+    char* b = buf[slot = (slot + 1) & 3];
+    if (f <= 0) std::snprintf(b, 40, "none");
+    else if (w.flag_names[f][0]) std::snprintf(b, 40, "%d %s", f, w.flag_names[f]);
+    else std::snprintf(b, 40, "%d (unnamed)", f);
+    return b;
+}
+
+// Flag id by name or number, 0 if none.
+int find_flag(const World& w, const char* s) {
+    if (!s || !*s) return 0;
+    char* end = nullptr;
+    long n = std::strtol(s, &end, 10);
+    if (end && *end == 0) return (n >= 1 && n <= kMaxFlags) ? (int)n : 0;
+    for (int f = 1; f <= kMaxFlags; ++f)
+        if (std::strcmp(w.flag_names[f], s) == 0) return f;
+    return 0;
 }
 
 // ---- Rooms ---------------------------------------------------------------
@@ -195,7 +218,10 @@ bool world_save(const World& w, const char* path) {
     std::fprintf(f, "# room <x> <y> <w> <h> <name>, then h rows of w tiles.\n");
     std::fprintf(f, "# tiles:");
     for (int i = 0; i < T_COUNT; ++i) std::fprintf(f, " %c=%s", kTileInfo[i].ch, kTileInfo[i].name);
-    std::fprintf(f, "\n\n");
+    std::fprintf(f, "\n");
+    for (int k = 1; k <= kMaxFlags; ++k)
+        if (w.flag_names[k][0]) std::fprintf(f, "flag %d %s\n", k, w.flag_names[k]);
+    std::fprintf(f, "\n");
     int saved = 0;
     static char line[kRoomMaxW + 2];
     for (int i = 0; i < w.room_count; ++i) {
@@ -254,6 +280,12 @@ bool world_load(World& w, const char* path) {
     int last_x = 0, last_y = 0;
     bool have_room = false;
     while (std::fgets(line, sizeof(line), f)) {
+        int fid = 0;
+        char fname[64];
+        if (std::sscanf(line, "flag %d %63s", &fid, fname) == 2 && fid >= 1 && fid <= kMaxFlags) {
+            std::snprintf(w.flag_names[fid], sizeof(w.flag_names[fid]), "%s", fname);
+            continue;
+        }
         int hx, hy, hf, hu, hc = 0;
         bool is_tag = have_room && std::sscanf(line, "tag %d %d %d %d %d", &hx, &hy, &hf, &hu, &hc) == 5;
         bool is_hole = !is_tag && have_room && std::sscanf(line, "hole %d %d %d %d", &hx, &hy, &hf, &hu) == 4;

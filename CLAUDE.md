@@ -31,7 +31,9 @@ of `src/game/*`.
 - Flags + switches + reactions (`src/game/react.cpp`): 31 world flags
   (`Play::flags`, saved in progress.txt). Per-tile `cond` (chunk array):
   1..31 = present while flag set, |0x80 = while NOT set; for switches /
-  fuses it's the flag they set. Flag changes rebuild the current room's
+  fuses it's the flag they set. Flags are named (`World::flag_names`,
+  `flag N name` lines in world.txt; `flag_label` / `find_flag`); always
+  refer to flags by name in UI / logs, and name every flag you add. Flag changes rebuild the current room's
   entities and "peek" the camera at the most-affected other room. Rooms
   can be dark (`Room::dark`: 255 always, N until flag N). Reactions are a
   10 Hz deterministic cellular sim over the current room (lava + water

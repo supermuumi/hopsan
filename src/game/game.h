@@ -25,7 +25,7 @@ constexpr const char* kTag = "game";
 // Bump whenever GameState's layout changes so a hot reload re-initialises
 // instead of reading garbage.
 constexpr uint32_t kStateMagic   = 0x484F5053u; // 'HOPS'
-constexpr uint32_t kStateVersion = 11;
+constexpr uint32_t kStateVersion = 12;
 
 // ---- Units ---------------------------------------------------------------
 // World units are pixels of the virtual screen. One tile is kTile pixels.
@@ -212,6 +212,7 @@ struct World {
     uint32_t gate_flags;     // bit N = flag N set
     ChunkMap map;
     int32_t  room_count;   // high-water mark; slots may be unused
+    char     flag_names[32][24];   // [1..31]; "" = unnamed (saved as "flag N name")
     Room     rooms[kMaxRooms];
 };
 
@@ -465,6 +466,7 @@ struct Editor {
     bool    dirty;
     char    status[96];
     float   status_timer;
+    float   flag_panel_timer;   // show the named-flags panel for a moment
 
     // Undo history.
     int32_t op_count;

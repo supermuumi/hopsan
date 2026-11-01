@@ -487,8 +487,9 @@ void editor_tick(GameState& s, float dt) {
         // Flag condition for the brush: - / = pick flag 0..31, \\ toggles "NOT".
         // (For switches / fuses it's the flag they set.)
         constexpr int SC_MINUS = 45, SC_EQUALS = 46, SC_BACKSLASH = 49;
-        if (kp[SC_MINUS])  e.flag_brush = (uint8_t)(e.flag_brush == 0 ? kMaxFlags : e.flag_brush - 1);
-        if (kp[SC_EQUALS]) e.flag_brush = (uint8_t)(e.flag_brush >= kMaxFlags ? 0 : e.flag_brush + 1);
+        if (kp[SC_MINUS])  { e.flag_brush = (uint8_t)(e.flag_brush == 0 ? kMaxFlags : e.flag_brush - 1); e.flag_panel_timer = 3; }
+        if (kp[SC_EQUALS]) { e.flag_brush = (uint8_t)(e.flag_brush >= kMaxFlags ? 0 : e.flag_brush + 1); e.flag_panel_timer = 3; }
+        if (kp[SC_BACKSLASH]) e.flag_panel_timer = 3;
         if (kp[SC_BACKSLASH]) e.flag_not = !e.flag_not;
         // Room darkness (room mode, L): lit -> always dark -> dark until brush flag -> lit.
         constexpr int SC_L_KEY = 15;
@@ -502,7 +503,7 @@ void editor_tick(GameState& s, float dt) {
                 undo_begin(e); ed_set_room(s, ri, r); undo_end(e);
                 if (r.dark == 0) set_status(e, "%s: lit", r.name);
                 else if (r.dark == 255) set_status(e, "%s: always dark", r.name);
-                else set_status(e, "%s: dark until flag %d", r.name, r.dark);
+                else set_status(e, "%s: dark until flag %s", r.name, flag_label(s.world, r.dark));
             }
         }
         // Preview the lair as it is at a given hole (0 = show everything).
@@ -774,11 +775,15 @@ void render_editor(GameState& s) {
                     float cpx = (float)(tx * kTile), cpy = (float)(ty * kTile);
                     bool target = cond_is_target(tile_raw(s.world, tx, ty));
                     wrect(cpx, cpy + kTile - 5, 5, 5, target ? rgba(255, 210, 60, 230) : rgba(90, 160, 255, 230));
-                    if (tile_px >= 28 && labels < 80) {
+                    // One label per group: only on the group's top-left tile.
+                    bool group_head = tile_cond(s.world, tx - 1, ty) != cond && tile_cond(s.world, tx, ty - 1) != cond;
+                    if (tile_px >= 28 && labels < 80 && group_head) {
                         ++labels;
-                        char lb[16];
-                        std::snprintf(lb, sizeof(lb), "%sF%d", target ? ">" : ((cond & kCondNot) ? "!" : ""), cond_flag(cond));
-                        text_sh(to_sx(cpx + kTile) - 7 * char_w() * 0.5f, to_sy(cpy) + 12, rgba(160, 200, 255), font_small(), lb);
+                        char lb[24];
+                        const char* nm = s.world.flag_names[cond_flag(cond)];
+                        if (nm[0]) std::snprintf(lb, sizeof(lb), "%s%.16s", target ? ">" : ((cond & kCondNot) ? "!" : ""), nm);
+                        else std::snprintf(lb, sizeof(lb), "%sF%d", target ? ">" : ((cond & kCondNot) ? "!" : ""), cond_flag(cond));
+                        text_sh(to_sx(cpx) + 2, to_sy(cpy) - 3, rgba(160, 200, 255), font_small(), lb);
                     }
                 }
                 if (!from && !until) continue;
@@ -862,20 +867,52 @@ void render_editor(GameState& s) {
         else if (e.hole_until) std::snprintf(tags, sizeof(tags), "until hole %d", e.hole_until);
         uint8_t hf, hu;
         tile_tags(s.world, mtx, mty, &hf, &hu);
-        char hov[40] = "";
-        if (hf || hu) std::snprintf(hov, sizeof(hov), "   hovered tile: from %d until %d", hf, hu);
+        char hov[96] = "";
+        uint8_t hc = tile_cond(s.world, mtx, mty);
+        if (hc) {
+            bool tgt = cond_is_target(tile_raw(s.world, mtx, mty));
+            std::snprintf(hov, sizeof(hov), "   hovered: %s flag %s", tgt ? "sets" : ((hc & kCondNot) ? "unless" : "while"),
+                          flag_label(s.world, cond_flag(hc)));
+        } else if (hf || hu) std::snprintf(hov, sizeof(hov), "   hovered tile: from %d until %d", hf, hu);
         char prev[24] = "all holes";
         if (e.preview_hole) std::snprintf(prev, sizeof(prev), "hole %d", e.preview_hole);
-        char fl[24] = "no flag";
-        if (e.flag_brush) std::snprintf(fl, sizeof(fl), "%sflag %d", e.flag_not ? "NOT " : "", e.flag_brush);
-        std::snprintf(buf, sizeof(buf), "brush: %s, %s  ([ ] Shift, - = \\)   |   preview: %s  (, .)%s", tags, fl, prev, hov);
+        char fl[48] = "no flag";
+        if (e.flag_brush) std::snprintf(fl, sizeof(fl), "%sflag %s", e.flag_not ? "NOT " : "", flag_label(s.world, e.flag_brush));
+        std::snprintf(buf, sizeof(buf), "brush: %s, %s  ([ ] Shift, - = \\)  |  preview: %s  (, .)", tags, fl, prev);
         srect(0, line_h() + 8 * g_ui, W, line_h(), rgba(20, 18, 32, 200));
         text(8 * g_ui, 2 * line_h() + 4 * g_ui,
              (e.hole_from || e.hole_until || e.preview_hole) ? rgba(140, 240, 160) : rgba(170, 170, 190),
              font_small(), "%s", buf);
+        if (hov[0]) {
+            srect(0, 2 * line_h() + 8 * g_ui, (float)std::strlen(hov) * char_w() + 16 * g_ui, line_h(), rgba(20, 18, 32, 200));
+            text(8 * g_ui, 3 * line_h() + 4 * g_ui, rgba(160, 200, 255), font_small(), "%s", hov + 3);
+        }
         if (e.status_timer > 0)
             text(W - (float)std::strlen(e.status) * char_w() - 10 * g_ui, line_h(),
                  with_alpha(rgba(255, 220, 120), clampf(e.status_timer, 0, 1)), font_small(), "%s", e.status);
+    }
+
+    // ---- UI: named flags (briefly, after changing the brush flag)
+    e.flag_panel_timer = fmaxf_(0, e.flag_panel_timer - s.in.dt);
+    if (e.flag_panel_timer > 0) {
+        int named = 0;
+        for (int f = 1; f <= kMaxFlags; ++f) named += s.world.flag_names[f][0] != 0;
+        float pw = 30 * char_w() + 16 * g_ui, ph = (float)(named + 2) * line_h() + 12 * g_ui;
+        float px = 10 * g_ui, py = 2 * line_h() + 20 * g_ui;
+        uint32_t a = (uint32_t)(clampf(e.flag_panel_timer, 0, 1) * 220);
+        srect(px, py, pw, ph, rgba(20, 18, 32, (int)a));
+        text(px + 8 * g_ui, py + line_h(), with_alpha(rgba(255, 220, 120), a / 220.0f), font_small(),
+             "flags  (console: flag_new <name>)");
+        int row = 2;
+        for (int f = 1; f <= kMaxFlags; ++f) {
+            if (!s.world.flag_names[f][0]) continue;
+            bool sel = f == e.flag_brush;
+            text(px + 8 * g_ui, py + (float)row++ * line_h(),
+                 with_alpha(sel ? rgba(140, 240, 160) : rgba(220, 220, 235), a / 220.0f), font_small(),
+                 "%s %2d  %s", sel ? ">" : " ", f, s.world.flag_names[f]);
+        }
+        if (named == 0)
+            text(px + 8 * g_ui, py + (float)row * line_h(), with_alpha(rgba(170, 170, 190), a / 220.0f), font_small(), "  (none named yet)");
     }
 
     // ---- UI: help

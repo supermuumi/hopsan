@@ -1,6 +1,10 @@
 # hopsan world v1
 # starter world -- edit me in-game (Tab), save with Ctrl+S
 
+flag 1 main_breaker
+flag 2 boiler_lights
+flag 3 lab_barricade_burnt
+
 room 0 0 40 23 start
 ##############################.....#####
 ##....~.......~.......~...|........B..##

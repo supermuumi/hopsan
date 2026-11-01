@@ -60,7 +60,7 @@ void flag_set(GameState& s, int f) {
     g.flags |= 1u << f;
     s.world.gate_flags = g.flags;
     progress_save(s);
-    logf(LOG_LEVEL_INFO, "flag %d set", f);
+    logf(LOG_LEVEL_INFO, "flag %s set", flag_label(s.world, f));
     // Things in this room may have appeared / vanished.
     if (g.room >= 0 && room_flag_refs(s, g.room, f) > 0) build_entities(s, g.room);
     // Show the room that changed the most (if it's elsewhere).

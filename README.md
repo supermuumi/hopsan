@@ -100,7 +100,8 @@ Console: `hole <n>` jumps the clock for testing.
 
 ## Switches, flags and dark rooms
 
-The world has 31 numbered **flags**. A **switch** (lever) sets its flag when
+The world has 31 **flags**, each with a name stored in the world file
+(`flag 3 lab_barricade_burnt`). A **switch** (lever) sets its flag when
 you touch it, and a burning **fuse** sets its flag when it burns out. Flags
 are permanent and saved with your progress (`progress_reset` clears them).
 
@@ -113,7 +114,14 @@ A room can be **dark**, always or until a flag is set. You see a pool of
 light around you; lava, fire, cables, switches, lasers and enemies still
 show.
 
-In the editor: `-` / `=` pick the brush's flag (0 = none), `\` toggles
+Console: `flag_new <name>` takes the first unused flag, names it and
+selects it as the brush flag; `flag_name <n|name> <new name>` renames one;
+`flags` lists every flag with whether it's set and which rooms use or set
+it; `flag <n|name> [on|off]` inspects or forces one for testing. Names are
+saved with the level (Ctrl+S).
+
+In the editor: `-` / `=` pick the brush's flag (0 = none), with a panel
+listing the named flags, `\` toggles
 "present while NOT set". For switches and fuses the brush flag is the flag
 they set. Blue corner markers show flag conditions, yellow ones show
 switch / fuse targets. In room mode, `L` cycles the hovered room between
