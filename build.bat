@@ -70,7 +70,11 @@ exit /b 0
 
 :build_game
 echo ==^> game
-cl %CXXFLAGS% /LD %INCLUDES% /Fo%BUILD%\game. /Fe%BUILD%\game.dll game.cpp ^
+REM The ImGui core is compiled into the game DLL too (it draws into the
+REM host's context). Built once and cached so hot reloads stay fast.
+call :compile_if_stale %BUILD%\game_imgui.obj src\build\imgui_core_unity.cpp "src\build\imgui_core_unity.cpp;external\imgui\imgui.cpp;external\imgui\imgui_draw.cpp;external\imgui\imgui_tables.cpp;external\imgui\imgui_widgets.cpp;external\imgui\imgui.h;external\imgui\imgui_internal.h"
+if errorlevel 1 exit /b 1
+cl %CXXFLAGS% /LD %INCLUDES% /Fo%BUILD%\game. /Fe%BUILD%\game.dll game.cpp %BUILD%\game_imgui.obj ^
    /link /PDB:%BUILD%\game.pdb
 if errorlevel 1 exit /b 1
 exit /b 0

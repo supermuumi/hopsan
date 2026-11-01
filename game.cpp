@@ -13,6 +13,7 @@
 //   editor.cpp -- the level editor (Tab)
 
 #include "game/game.h"
+#include "imgui.h"
 #include "game/atlas_data.h"
 
 #include "game/world.cpp"
@@ -23,6 +24,7 @@
 #include "game/react.cpp"
 #include "game/play.cpp"
 #include "game/editor.cpp"
+#include "game/tools.cpp"
 
 namespace hop {
 
@@ -100,21 +102,11 @@ void cmd_hole(int argc, const char** argv, void* user) {
 void cmd_flag_new(int argc, const char** argv, void* user) {
     GameState* s = state_of(user);
     if (argc < 2) { logf(LOG_LEVEL_WARN, "usage: flag_new <name>"); return; }
-    if (find_flag(s->world, argv[1])) { logf(LOG_LEVEL_WARN, "flag '%s' already exists", argv[1]); return; }
-    for (int f = 1; f <= kMaxFlags; ++f) {
-        if (s->world.flag_names[f][0]) continue;
-        bool used = false;   // also skip numbers already used by tiles / rooms
-        for (int r = 0; r < s->world.room_count && !used; ++r)
-            if (s->world.rooms[r].used && room_flag_refs(*s, r, f) > 0) used = true;
-        if (used) continue;
-        std::snprintf(s->world.flag_names[f], sizeof(s->world.flag_names[f]), "%s", argv[1]);
-        s->ed.flag_brush = (uint8_t)f;
-        s->ed.flag_panel_timer = 4;
-        s->ed.dirty = true;
-        logf(LOG_LEVEL_INFO, "new flag %s (selected as the brush flag; save with Ctrl+S)", flag_label(s->world, f));
-        return;
-    }
-    logf(LOG_LEVEL_WARN, "all %d flags are in use", kMaxFlags);
+    int f = flag_create(*s, argv[1]);
+    if (!f) { logf(LOG_LEVEL_WARN, "can't add '%s' (name taken or no free flags)", argv[1]); return; }
+    s->ed.flag_brush = (uint8_t)f;
+    s->ed.flag_panel_timer = 4;
+    logf(LOG_LEVEL_INFO, "new flag %s (selected as the brush flag; save with Ctrl+S)", flag_label(s->world, f));
 }
 
 // flag_name <n> <name>
@@ -131,23 +123,13 @@ void cmd_flag_name(int argc, const char** argv, void* user) {
 void cmd_flags(int, const char**, void* user) {
     GameState* s = state_of(user);
     int shown = 0;
+    char rooms[160];
     for (int f = 1; f <= kMaxFlags; ++f) {
-        char rooms[160] = "";
-        for (int r = 0; r < s->world.room_count; ++r) {
-            if (!s->world.rooms[r].used) continue;
-            const Room& rm = s->world.rooms[r];
-            bool sets = false, uses = room_flag_refs(*s, r, f) > 0;
-            for (int y = rm.y; y < rm.y + rm.h && !sets; ++y)
-                for (int x = rm.x; x < rm.x + rm.w && !sets; ++x)
-                    if (cond_is_target(tile_raw(s->world, x, y)) && cond_flag(tile_cond(s->world, x, y)) == f) sets = true;
-            if (!sets && !uses) continue;
-            size_t n = std::strlen(rooms);
-            std::snprintf(rooms + n, sizeof(rooms) - n, "%s%s%s", n ? ", " : "", rm.name, sets ? " (sets)" : "");
-        }
-        if (!s->world.flag_names[f][0] && !rooms[0]) continue;
+        bool used = flag_usage(*s, f, rooms, sizeof(rooms));
+        if (!s->world.flag_names[f][0] && !used) continue;
         ++shown;
         logf(LOG_LEVEL_INFO, "%-22s %s  %s", flag_label(s->world, f), flag_is_set(s->play, f) ? "SET  " : "unset",
-             rooms[0] ? rooms : "(unused)");
+             used ? rooms : "(unused)");
     }
     if (!shown) logf(LOG_LEVEL_INFO, "no flags yet -- flag_new <name> makes one");
 }
@@ -158,12 +140,7 @@ void cmd_flag(int argc, const char** argv, void* user) {
     int f = argc >= 2 ? find_flag(s->world, argv[1]) : 0;
     if (!f) { logf(LOG_LEVEL_WARN, "usage: flag <n|name> [on|off]"); return; }
     if (argc >= 3 && std::strcmp(argv[2], "on") == 0) flag_set(*s, f);
-    else if (argc >= 3 && std::strcmp(argv[2], "off") == 0) {
-        s->play.flags &= ~(1u << f);
-        s->world.gate_flags = s->play.flags;
-        progress_save(*s);
-        if (s->play.room >= 0) build_entities(*s, s->play.room);
-    }
+    else if (argc >= 3 && std::strcmp(argv[2], "off") == 0) flag_clear(*s, f);
     logf(LOG_LEVEL_INFO, "flag %s is %s", flag_label(s->world, f), flag_is_set(s->play, f) ? "set" : "not set");
 }
 
@@ -260,6 +237,9 @@ GAME_EXPORT void game_tick(void* memory, const FrameInput* input) {
     s->real_time += input->dt;
     g_ui = input->window_h >= 1300 ? 2 : 1;
 
+    constexpr int SC_F4 = 61;
+    if (input->keys_pressed[SC_F4]) s->ed.flags_window = !s->ed.flags_window;
+
     constexpr int SC_TAB_KEY = 43;
     if (input->keys_pressed[SC_TAB_KEY]) {
         if (s->mode == MODE_PLAY) editor_enter(*s);
@@ -303,4 +283,16 @@ GAME_EXPORT void game_render(void* memory, RenderCommands* out) {
     out->quads = s->quads;
     out->quad_count = s->quad_count;
     g_out = nullptr;
+}
+
+// Optional: the game's ImGui tool windows, drawn into the host's context.
+GAME_EXPORT void game_imgui(void* memory) {
+    GameState* s = state_of(memory);
+    if (!s || s->magic != kStateMagic || !s->platform || !s->platform->imgui_context) return;
+    g_state = s;
+    // This library has its own copy of ImGui's globals: point it at the
+    // host's context and allocators (needed again after every hot reload).
+    ImGui::SetCurrentContext((ImGuiContext*)s->platform->imgui_context);
+    ImGui::SetAllocatorFunctions(s->platform->imgui_alloc, s->platform->imgui_free, s->platform->imgui_alloc_user);
+    draw_flags_window(*s);
 }

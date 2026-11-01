@@ -168,6 +168,16 @@ int main(int /*argc*/, char** /*argv*/) {
     platform.log              = platform_log;
     platform.console_register = platform_console_register;
     platform.asset_load       = platform_asset_load;
+    {
+        ImGuiMemAllocFunc alloc_fn = nullptr;
+        ImGuiMemFreeFunc  free_fn  = nullptr;
+        void*             user     = nullptr;
+        ImGui::GetAllocatorFunctions(&alloc_fn, &free_fn, &user);
+        platform.imgui_context    = ImGui::GetCurrentContext();
+        platform.imgui_alloc      = alloc_fn;
+        platform.imgui_free       = free_fn;
+        platform.imgui_alloc_user = user;
+    }
 
     HostState host;
     host.console = console;
@@ -343,6 +353,11 @@ int main(int /*argc*/, char** /*argv*/) {
         ImGui::NewFrame();
 
         engine::console_draw(console);
+        if (loader.loaded) {
+            // Optional: the game's own ImGui windows (editor tools).
+            if (auto game_imgui = (GameImguiFn)engine::game_loader_resolve(&loader, "game_imgui"))
+                game_imgui(game_memory);
+        }
 
         ImGui::Render();
         ImDrawData* draw_data = ImGui::GetDrawData();

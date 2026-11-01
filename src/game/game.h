@@ -25,7 +25,7 @@ constexpr const char* kTag = "game";
 // Bump whenever GameState's layout changes so a hot reload re-initialises
 // instead of reading garbage.
 constexpr uint32_t kStateMagic   = 0x484F5053u; // 'HOPS'
-constexpr uint32_t kStateVersion = 12;
+constexpr uint32_t kStateVersion = 13;
 
 // ---- Units ---------------------------------------------------------------
 // World units are pixels of the virtual screen. One tile is kTile pixels.
@@ -467,6 +467,9 @@ struct Editor {
     char    status[96];
     float   status_timer;
     float   flag_panel_timer;   // show the named-flags panel for a moment
+    bool    flags_window;       // ImGui Flags window (F4)
+    bool    flags_show_all;
+    char    new_flag_name[24];
 
     // Undo history.
     int32_t op_count;

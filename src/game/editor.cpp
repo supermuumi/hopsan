@@ -894,7 +894,7 @@ void render_editor(GameState& s) {
 
     // ---- UI: named flags (briefly, after changing the brush flag)
     e.flag_panel_timer = fmaxf_(0, e.flag_panel_timer - s.in.dt);
-    if (e.flag_panel_timer > 0) {
+    if (e.flag_panel_timer > 0 && !e.flags_window) {
         int named = 0;
         for (int f = 1; f <= kMaxFlags; ++f) named += s.world.flag_names[f][0] != 0;
         float pw = 30 * char_w() + 16 * g_ui, ph = (float)(named + 2) * line_h() + 12 * g_ui;
@@ -938,6 +938,7 @@ void render_editor(GameState& s) {
             "[ / ]       brush: appears from hole N",
             "Shift+[ / ] brush: gone from hole N",
             ", / .       preview the lair at a hole",
+            "F4          Flags window (names, set, use)",
             "- / =       brush flag (switch target /",
             "  \\         present-if-flag; \\ = NOT)",
             "L (rooms)   room dark / dark until flag",

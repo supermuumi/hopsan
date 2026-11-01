@@ -114,6 +114,11 @@ A room can be **dark**, always or until a flag is set. You see a pool of
 light around you; lava, fire, cables, switches, lasers and enemies still
 show.
 
+**Flags window (F4)**, in the editor or while playing: pick the brush flag
+(and NOT), add a named flag, rename flags, tick a flag on / off for
+testing, and see which rooms use each flag ("(sets)" marks the room with
+its switch or fuse). Names are single words, saved with the level.
+
 Console: `flag_new <name>` takes the first unused flag, names it and
 selects it as the brush flag; `flag_name <n|name> <new name>` renames one;
 `flags` lists every flag with whether it's set and which rooms use or set
@@ -270,6 +275,7 @@ whether the dash is ready.
 | Golf-hole tags on the brush | `[` `]` (from), Shift+`[` `]` (until) |
 | Preview the lair at a hole | `,` `.` |
 | Brush flag / NOT | `-` `=` / `\` |
+| Flags window | `F4` |
 | Room dark / dark until flag (room mode) | `L` |
 
 On macOS, Cmd works in place of Ctrl. You can only paint inside rooms,
@@ -280,6 +286,10 @@ the room under the cursor).
 
 ## Engine notes
 
+- The game can draw ImGui tool windows: the host passes its ImGui context
+  through `EnginePlatform`, the game library links its own copy of the
+  ImGui core (`src/build/imgui_core_unity.cpp`, built once and cached),
+  and the host calls the optional `game_imgui` export each frame.
 - Hot-reloadable game DLL: run `./build.sh game` while the game is running
   and it reloads in place. Game state survives as long as the `GameState`
   layout is unchanged (`kStateVersion` in `src/game/game.h`).

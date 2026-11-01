@@ -68,7 +68,12 @@ _run() {
 
 build_game() {
     echo "==> game"
-    _run $CXX $CXXFLAGS $GAME_FLAGS $INCLUDES -o "$GAME_LIB" game.cpp
+    # The ImGui core is compiled into the game library too (it draws into the
+    # host's context). Built once and cached so hot reloads stay fast.
+    if _stale "$BUILD/game_imgui.o" src/build/imgui_core_unity.cpp external/imgui/imgui.cpp external/imgui/imgui_draw.cpp external/imgui/imgui_tables.cpp external/imgui/imgui_widgets.cpp external/imgui/imgui.h external/imgui/imgui_internal.h; then
+        _run $CXX $CXXFLAGS -fPIC $INCLUDES -c -o "$BUILD/game_imgui.o" src/build/imgui_core_unity.cpp
+    fi
+    _run $CXX $CXXFLAGS $GAME_FLAGS $INCLUDES -o "$GAME_LIB" game.cpp "$BUILD/game_imgui.o"
 }
 
 build_host() {

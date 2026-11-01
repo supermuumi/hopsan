@@ -43,6 +43,14 @@ struct EnginePlatform {
     // Load (or fetch cached) an asset by path. Returns 0 on failure.
     // Paths are resolved relative to the engine binary's working directory.
     AssetHandle (*asset_load)(AssetKindAPI kind, const char* path);
+
+    // The host's ImGui context + allocators. The game library compiles its
+    // own copy of the ImGui core and must call ImGui::SetCurrentContext /
+    // SetAllocatorFunctions with these before using ImGui (in game_imgui).
+    void*  imgui_context;
+    void* (*imgui_alloc)(size_t size, void* user);
+    void  (*imgui_free)(void* ptr, void* user);
+    void*  imgui_alloc_user;
 };
 
 // Per-frame input snapshot. Edge-triggered + held state.
@@ -211,3 +219,6 @@ struct RenderCommands {
 typedef void (*GameInitFn)  (void* memory, size_t size, EnginePlatform* platform);
 typedef void (*GameTickFn)  (void* memory, const FrameInput* input);
 typedef void (*GameRenderFn)(void* memory, RenderCommands* out);
+// Optional export: called every frame between ImGui::NewFrame and
+// ImGui::Render so the game can draw its own ImGui tool windows.
+typedef void (*GameImguiFn) (void* memory);

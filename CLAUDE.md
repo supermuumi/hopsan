@@ -103,6 +103,11 @@ it's free.
   conveyors, drones.
 - `src/game/react.cpp` — flags, switches, camera peek, dark rooms, and the
   reaction sim (lava, fire, basalt, cauldrons, cables, fuses).
+- `src/game/tools.cpp` — game-side ImGui tool windows (Flags window, F4)
+  + shared flag helpers (`flag_create`, `flag_clear`, `flag_usage`).
+  Drawn from the optional `game_imgui` export into the host's ImGui
+  context (`EnginePlatform::imgui_context` + allocators); the game library
+  links its own ImGui core (`src/build/imgui_core_unity.cpp`).
 - `src/game/play.cpp` — fixed-60Hz sim: player physics + tuning constants,
   entities, hazards, room transitions, respawn, camera, play renderer.
 - `src/game/editor.cpp` — level editor (tile + room modes, undo / redo).
