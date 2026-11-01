@@ -20,6 +20,7 @@
 #include "game/draw.cpp"
 #include "game/clock.cpp"
 #include "game/hazards.cpp"
+#include "game/react.cpp"
 #include "game/play.cpp"
 #include "game/editor.cpp"
 
@@ -29,11 +30,16 @@ GameState* state_of(void* memory) { return static_cast<GameState*>(memory); }
 
 void cmd_save(int, const char**, void* user) {
     GameState* s = state_of(user);
+    // Never save a room mid-reaction: put it back as designed first.
+    bool playing = s->mode == MODE_PLAY && s->play.snap_valid;
+    if (playing) react_restore(*s);
     if (world_save(s->world, kWorldPath)) s->ed.dirty = false;
+    if (playing) { react_snapshot(*s, s->play.room); build_entities(*s, s->play.room); }
 }
 
 void cmd_load(int, const char**, void* user) {
     GameState* s = state_of(user);
+    s->play.snap_valid = false;   // the snapshot belongs to the old world
     if (!world_load(s->world, kWorldPath)) return;
     undo_clear(s->ed);
     s->ed.dirty = false;
@@ -160,6 +166,7 @@ GAME_EXPORT void game_init(void* memory, size_t size, EnginePlatform* platform) 
         world_make_default(s->world);
     }
     s->play.rng = 0x1234567u;
+    s->play.peek_room = -1;
     s->play.respawn_mode = RESPAWN_ROOM_ENTRY;
     s->ed.grid = true;
     s->ed.help = true;
@@ -188,6 +195,8 @@ GAME_EXPORT void game_tick(void* memory, const FrameInput* input) {
     // Golf-hole gating: play shows the lair at the current hole; the editor
     // shows everything unless previewing a hole.
     s->world.gate_hole = s->mode == MODE_PLAY ? s->play.hole : s->ed.preview_hole;
+    s->world.gate_use_flags = s->mode == MODE_PLAY;
+    s->world.gate_flags = s->play.flags;
 
     if (s->mode == MODE_PLAY) {
         gather_actions(*s, *input);

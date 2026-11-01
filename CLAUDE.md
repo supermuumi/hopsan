@@ -28,6 +28,18 @@ of `src/game/*`.
   drones / sharks faster, red alarm lighting from hole 13.
   Level-design rule: any tagged change must keep every room reachable at
   every hole (e.g. the sealed reception door is backed by the tank exit).
+- Flags + switches + reactions (`src/game/react.cpp`): 31 world flags
+  (`Play::flags`, saved in progress.txt). Per-tile `cond` (chunk array):
+  1..31 = present while flag set, |0x80 = while NOT set; for switches /
+  fuses it's the flag they set. Flag changes rebuild the current room's
+  entities and "peek" the camera at the most-affected other room. Rooms
+  can be dark (`Room::dark`: 255 always, N until flag N). Reactions are a
+  10 Hz deterministic cellular sim over the current room (lava flow /
+  cooling / quench to basalt, fire spread, electrified water flood fill,
+  cauldron emitters). The room's tiles are snapshotted on build and
+  restored on death / leaving / entering the editor / saving.
+  Level-design rules: plan pieces must never be destroyable; every room
+  must stay reachable for every reachable combination of holes + flags.
 - Graded endings (not implemented yet) come from a second, optional
   collectible (the boss's silly laser add-ons), never from missing
   required pieces.
@@ -79,6 +91,8 @@ it's free.
 - `src/game/hazards.cpp` — lasers (constant / pulse A / pulse B,
   auto-aimed away from their mounting wall), water + swimming, sharks,
   conveyors, drones.
+- `src/game/react.cpp` — flags, switches, camera peek, dark rooms, and the
+  reaction sim (lava, fire, basalt, cauldrons, cables, fuses).
 - `src/game/play.cpp` — fixed-60Hz sim: player physics + tuning constants,
   entities, hazards, room transitions, respawn, camera, play renderer.
 - `src/game/editor.cpp` — level editor (tile + room modes, undo / redo).

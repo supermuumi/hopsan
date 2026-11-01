@@ -98,6 +98,45 @@ seals (go round through the Shark Tank, which now has a way back up).
 
 Console: `hole <n>` jumps the clock for testing.
 
+## Switches, flags and dark rooms
+
+The world has 31 numbered **flags**. A **switch** (lever) sets its flag when
+you touch it, and a burning **fuse** sets its flag when it burns out. Flags
+are permanent and saved with your progress (`progress_reset` clears them).
+
+Any tile can be tagged to be present only while a flag is set, or only
+while it's *not* set. Use that for doors, walls, lasers, cables and so on.
+When a flag changes something in another room, the camera pans over to
+show it, then comes back.
+
+A room can be **dark**, always or until a flag is set. You see a pool of
+light around you; lava, fire, cables, switches, lasers and enemies still
+show.
+
+In the editor: `-` / `=` pick the brush's flag (0 = none), `\` toggles
+"present while NOT set". For switches and fuses the brush flag is the flag
+they set. Blue corner markers show flag conditions, yellow ones show
+switch / fuse targets. In room mode, `L` cycles the hovered room between
+lit, always dark, and dark until the brush flag.
+
+## Reactions
+
+A small simulation runs over the current room at 10 Hz, the same way every
+time, and resets when you die or leave:
+
+- **Lava** (`&`) falls, then runs in its flow direction, pours over edges,
+  and cools to **basalt** (`o`, solid) after resting for 3 s. Touching water
+  turns it to basalt straight away. It ignites anything flammable. Lethal.
+- **Fire** burns through wood crates (`W`), wooden platforms, fuses, cables
+  and plants, then leaves a gap. Water puts it out. Lethal.
+- **Cauldron** (`U`): push into it for a moment, or dash into it, to tip it
+  over. It pours 30 cells of lava the way you pushed.
+- **Live cable** (`z`): lethal to touch, and it electrifies any body of water
+  it touches (sparks show it). It burns.
+- **Fuse** (`i`): a wick that burns fast and sets its flag when it's gone.
+
+Plan pieces are never destroyed by reactions.
+
 ## The world
 
 - The world is made of **rooms**: rectangles of 16px tiles placed on one
@@ -133,7 +172,13 @@ mushrooms, rubble, vines, chain, torch, pillar), and lair hazards:
   wall, spikes or the room edge. They fly through one-way platforms.
 
 The starter world: the four grounds rooms plus the lair (Your Desk,
-Reception, The Shark Tank, Boiler Room, Server Farm, The Giga Laser). Decorations aren't solid; in the
+Reception, The Shark Tank, Boiler Room, Server Farm, The Giga Laser, The
+Lab). **The Lab** (left of the Shark Tank) is a chain-reaction puzzle: tip
+the cauldron, and the lava builds a basalt bridge over the electrified pit,
+burns the fuse and the barricade, and opens the way to the plan piece. The
+fuse turns on the lights in the Boiler Room, which is dark until then. The
+Boiler Room's main breaker (top right) switches off the Server Farm's rack
+lasers. Decorations aren't solid; in the
 editor reach them with Q / E (keys 1-0 cover the first ten brushes).
 
 ## Art
@@ -186,6 +231,8 @@ whether the dash is ready.
 | Grid / help | G / H |
 | Golf-hole tags on the brush | `[` `]` (from), Shift+`[` `]` (until) |
 | Preview the lair at a hole | `,` `.` |
+| Brush flag / NOT | `-` `=` / `\` |
+| Room dark / dark until flag (room mode) | `L` |
 
 On macOS, Cmd works in place of Ctrl. You can only paint inside rooms,
 because tiles outside rooms aren't saved. Console commands: `save`,

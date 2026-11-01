@@ -117,6 +117,7 @@ Entity* entity_at_tile(Play& g, uint8_t kind, int tx, int ty) {
 bool solid_at(GameState& s, int tx, int ty) {
     uint8_t t = tile_get(s.world, tx, ty);
     if (t == T_ROCK || t == T_BRICK || conveyor_dir(t) != 0 || tile_is_laser(t)) return true;
+    if (t == T_WOOD || t == T_BASALT || t == T_CAULDRON || t == T_CAULDRON_TIPPED) return true;
     if (t == T_CRUMBLE) {
         Entity* e = entity_at_tile(s.play, E_CRUMBLE, tx, ty);
         return !e || e->state != 2;
@@ -204,6 +205,9 @@ void build_entities(GameState& s, int room) {
             e.y = (float)(ty * kTile + 4);
             e.dir = (hash2(tx, ty) & 1) ? 1 : -1;
             if (kind == E_STAR && star_collected(g, tx, ty)) e.state = 2;
+            if (kind == E_STAR)
+                for (int k = 0; k < g.pending_count; ++k)
+                    if (g.pending[k].x == tx && g.pending[k].y == ty) e.state = 1;   // already picked up this attempt
             hazard_init(s, e, t);
         }
     }
@@ -222,8 +226,13 @@ void place_player(GameState& s, int x, int y, int room) {
     p.stamina = kStaminaMax;
     p.squash_x = p.squash_y = 1;
     p.on_ground = true;
+    react_restore(s);              // undo lava / fire / etc. from the last attempt
     g.room = room;
+    g.peek_room = -1;
     if (g.hole > 0) s.world.gate_hole = g.hole;   // play always sees the current hole
+    s.world.gate_use_flags = true;
+    s.world.gate_flags = g.flags;
+    react_snapshot(s, room);
     build_entities(s, room);
     snap_camera(s);
 }
@@ -349,7 +358,9 @@ void enter_room(GameState& s, int room) {
     g.trans_from_y = g.cam_y;
     g.transitioning = true;
     g.trans_t = 0;
+    react_restore(s);              // the room you left resets
     g.room = room;
+    react_snapshot(s, room);
 
     // Push the player fully inside the new room so it can't bounce back.
     int rx0 = r.x * kTile, ry0 = r.y * kTile;
@@ -942,6 +953,8 @@ void sim_step(GameState& s) {
 
     // A full-screen card pauses the game entirely.
     if (g.card_kind != CARD_NONE) { card_tick(s, dt); return; }
+    // Showing the room a switch affected also pauses everything.
+    if (peek_tick(s, dt)) { s.act.jump_latched = s.act.dash_latched = false; return; }
 
     // Latched presses become buffers so a press is never lost.
     if (s.act.jump_latched) { p.jump_buffer = kJumpBufferTime; s.act.jump_latched = false; }
@@ -975,8 +988,10 @@ void sim_step(GameState& s) {
     }
 
     update_entities(s, dt);
+    react_update(s, dt);
     player_update(s, dt);
     check_interactions(s);
+    if (!g.dying) react_player(s, dt);
     if (!g.dying) {
         update_safe_spawn(s);
         check_room_bounds(s);
@@ -1191,8 +1206,11 @@ void render_play(GameState& s) {
     // Snap the camera to whole screen pixels' worth of world: half world
     // units (one art pixel) when the scale is even, whole units otherwise.
     float cam_snap = (scale % 2 == 0) ? (float)kArtScale : 1.0f;
-    g_view.cam_x = std::floor(g.cam_x * cam_snap + 0.5f) / cam_snap + shx;
-    g_view.cam_y = std::floor(g.cam_y * cam_snap + 0.5f) / cam_snap + shy;
+    float cam_x = g.cam_x, cam_y = g.cam_y;
+    bool peeking = g.peek_room >= 0;
+    if (peeking) peek_camera(s, &cam_x, &cam_y);
+    g_view.cam_x = std::floor(cam_x * cam_snap + 0.5f) / cam_snap + shx;
+    g_view.cam_y = std::floor(cam_y * cam_snap + 0.5f) / cam_snap + shy;
     g_view.scale = (float)scale;
     g_view.ox = (float)ox; g_view.oy = (float)oy;
     g_view.clip_x0 = (float)ox; g_view.clip_y0 = (float)oy;
@@ -1205,15 +1223,28 @@ void render_play(GameState& s) {
     draw_parallax(0.2f, rgba(48, 44, 84), 90, 80, 7);
     draw_parallax(0.45f, rgba(36, 34, 64), 40, 70, 13);
 
-    if (g.room >= 0 && !g.transitioning) draw_void_outside(s.world, g.room, rgba(12, 10, 20));
+    if (g.room >= 0 && !g.transitioning && !peeking) draw_void_outside(s.world, g.room, rgba(12, 10, 20));
 
     draw_tiles(s.world, true, PASS_BACK);    // backdrop + decorations
-    draw_tiles(s.world, true, PASS_SOLID);   // solids, platforms, spikes
+    // While peeking at another room its hazards are only tiles, so draw them.
+    g_live_room = g.room;
+    draw_tiles(s.world, !peeking, PASS_SOLID);   // solids, platforms, spikes
+    g_live_room = -1;
     draw_tiles(s.world, true, PASS_MOSS);
+    // Dark rooms: a pool of light around the player; glowing things show through.
+    int view_room = peeking ? g.peek_room : g.room;
+    if (room_is_dark(s, view_room)) {
+        float vx0 = g_view.cam_x, vy0 = g_view.cam_y;
+        float pcx = peeking ? -1e6f : (float)g.p.x + kPlayerW * 0.5f;
+        float pcy = peeking ? -1e6f : (float)g.p.y + kPlayerH * 0.5f;
+        draw_darkness(pcx, pcy, vx0 - 8, vy0 - 8, vx0 + kViewW + 8, vy0 + kViewH + 8);
+        draw_glow_tiles(s);
+    }
     draw_entities(s);
     draw_particles(g);
     draw_player(s);
     draw_water_front(s.world, g.time);
+    draw_electric(s);
 
     draw_alarm(s, ox, oy, vw, vh);
     if (g.fade > 0) srect((float)ox, (float)oy, (float)vw, (float)vh, rgba(0, 0, 0, (int)(g.fade * 255)));

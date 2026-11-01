@@ -21,6 +21,7 @@ constexpr uint8_t kPalette[] = {
     T_SPRING, T_CRYSTAL, T_STAR, T_CHECKPOINT, T_WALKER, T_START,
     T_LASER, T_LASER_A, T_LASER_B, T_WATER, T_SHARK, T_CONVEYOR_L, T_CONVEYOR_R,
     T_DRONE_H, T_DRONE_V,
+    T_SWITCH, T_LAVA, T_WOOD, T_BASALT, T_CAULDRON, T_CABLE, T_FUSE,
     T_DECOR_GRASS, T_DECOR_FERN, T_DECOR_SHROOMS, T_DECOR_RUBBLE,
     T_DECOR_VINES, T_DECOR_CHAIN, T_DECOR_TORCH, T_DECOR_PILLAR,
 };
@@ -74,22 +75,30 @@ void undo_end(Editor& e) {
     e.dirty = true;
 }
 
-// Set a tile and its golf-hole tags, recording the change for undo.
-void ed_set_tile_tags(GameState& s, int tx, int ty, uint8_t t, uint8_t from, uint8_t until) {
+// Set a tile and its tags, recording the change for undo.
+void ed_set_tile_tags(GameState& s, int tx, int ty, uint8_t t, uint8_t from, uint8_t until, uint8_t cond) {
     Editor& e = s.ed;
-    if (t == T_EMPTY) from = until = 0;
-    uint8_t before = tile_raw(s.world, tx, ty), bf, bu;
+    if (t == T_EMPTY) from = until = cond = 0;
+    uint8_t before = tile_raw(s.world, tx, ty), bf, bu, bc = tile_cond(s.world, tx, ty);
     tile_tags(s.world, tx, ty, &bf, &bu);
-    if (before == t && bf == from && bu == until) return;
+    if (before == t && bf == from && bu == until && bc == cond) return;
     if (e.op_open && e.tile_used < kMaxTileChanges)
-        e.tiles[e.tile_used++] = TileChange{ tx, ty, before, t, bf, bu, from, until };
-    tile_set_full(s.world, tx, ty, t, from, until);
+        e.tiles[e.tile_used++] = TileChange{ tx, ty, before, t, bf, bu, from, until, bc, cond };
+    tile_set_full(s.world, tx, ty, t, from, until, cond);
     e.dirty = true;
 }
 
-// Paint with the brush's golf-hole tags.
+// The brush's flag condition for tile type t. Switches and fuses always
+// need a target flag (default 1).
+uint8_t brush_cond(const Editor& e, uint8_t t) {
+    if (cond_is_target(t)) return (uint8_t)(e.flag_brush ? e.flag_brush : 1);
+    if (!e.flag_brush) return 0;
+    return (uint8_t)(e.flag_brush | (e.flag_not ? kCondNot : 0));
+}
+
+// Paint with the brush's tags.
 void ed_set_tile(GameState& s, int tx, int ty, uint8_t t) {
-    ed_set_tile_tags(s, tx, ty, t, s.ed.hole_from, s.ed.hole_until);
+    ed_set_tile_tags(s, tx, ty, t, s.ed.hole_from, s.ed.hole_until, brush_cond(s.ed, t));
 }
 
 void ed_set_room(GameState& s, int idx, const Room& after) {
@@ -108,7 +117,7 @@ void undo(GameState& s) {
     for (int i = op.room_end - 1; i >= op.room_begin; --i) s.world.rooms[e.rooms[i].idx] = e.rooms[i].before;
     for (int i = op.tile_end - 1; i >= op.tile_begin; --i) {
         const TileChange& c = e.tiles[i];
-        tile_set_full(s.world, c.x, c.y, c.before, c.before_from, c.before_until);
+        tile_set_full(s.world, c.x, c.y, c.before, c.before_from, c.before_until, c.before_cond);
     }
     e.dirty = true;
     set_status(e, "undo (%d left)", e.op_cursor);
@@ -120,7 +129,7 @@ void redo(GameState& s) {
     const UndoOp& op = e.ops[e.op_cursor++];
     for (int i = op.tile_begin; i < op.tile_end; ++i) {
         const TileChange& c = e.tiles[i];
-        tile_set_full(s.world, c.x, c.y, c.after, c.after_from, c.after_until);
+        tile_set_full(s.world, c.x, c.y, c.after, c.after_from, c.after_until, c.after_cond);
     }
     for (int i = op.room_begin; i < op.room_end; ++i) s.world.rooms[e.rooms[i].idx] = e.rooms[i].after;
     e.dirty = true;
@@ -264,6 +273,8 @@ void frame_world(GameState& s) {
 void editor_enter(GameState& s) {
     Editor& e = s.ed;
     s.mode = MODE_EDIT;
+    react_restore(s);   // edit the level as designed, not mid-reaction
+    s.play.peek_room = -1;
     if (e.zoom <= 0) e.zoom = ed_scale_base(s);
     // Centre on the player.
     float px = (float)s.play.p.x + kPlayerW * 0.5f, py = (float)s.play.p.y + kPlayerH * 0.5f;
@@ -299,6 +310,9 @@ void editor_exit(GameState& s, bool at_cursor) {
         else {
             g.room = room;
             g.transitioning = false;
+            s.world.gate_use_flags = true;
+            s.world.gate_flags = g.flags;
+            react_snapshot(s, room);
             build_entities(s, room);
             snap_camera(s);
         }
@@ -369,12 +383,13 @@ void editor_room_drag_finish(GameState& s) {
                 int i = y * kRoomMaxW + x;
                 e.scratch[i] = tile_raw(s.world, o.x + x, o.y + y);
                 tile_tags(s.world, o.x + x, o.y + y, &e.scratch_from[i], &e.scratch_until[i]);
+                e.scratch_cond[i] = tile_cond(s.world, o.x + x, o.y + y);
                 ed_set_tile(s, o.x + x, o.y + y, T_EMPTY);
             }
         for (int y = 0; y < o.h; ++y)
             for (int x = 0; x < o.w; ++x) {
                 int i = y * kRoomMaxW + x;
-                ed_set_tile_tags(s, c.x + x, c.y + y, e.scratch[i], e.scratch_from[i], e.scratch_until[i]);
+                ed_set_tile_tags(s, c.x + x, c.y + y, e.scratch[i], e.scratch_from[i], e.scratch_until[i], e.scratch_cond[i]);
             }
         ed_set_room(s, e.drag_room, c);
         set_status(e, "moved %s", c.name);
@@ -468,6 +483,27 @@ void editor_tick(GameState& s, float dt) {
                 else e.hole_until = (uint8_t)imin(kHoles, e.hole_from + 1);
             }
             set_status(e, "brush: %s", "hole tags updated");
+        }
+        // Flag condition for the brush: - / = pick flag 0..31, \\ toggles "NOT".
+        // (For switches / fuses it's the flag they set.)
+        constexpr int SC_MINUS = 45, SC_EQUALS = 46, SC_BACKSLASH = 49;
+        if (kp[SC_MINUS])  e.flag_brush = (uint8_t)(e.flag_brush == 0 ? kMaxFlags : e.flag_brush - 1);
+        if (kp[SC_EQUALS]) e.flag_brush = (uint8_t)(e.flag_brush >= kMaxFlags ? 0 : e.flag_brush + 1);
+        if (kp[SC_BACKSLASH]) e.flag_not = !e.flag_not;
+        // Room darkness (room mode, L): lit -> always dark -> dark until brush flag -> lit.
+        constexpr int SC_L_KEY = 15;
+        if (e.room_mode && kp[SC_L_KEY]) {
+            int ri = room_at_tile(s.world, mtx, mty);
+            if (ri >= 0) {
+                Room r = s.world.rooms[ri];
+                if (r.dark == 0) r.dark = 255;
+                else if (r.dark == 255 && e.flag_brush) r.dark = e.flag_brush;
+                else r.dark = 0;
+                undo_begin(e); ed_set_room(s, ri, r); undo_end(e);
+                if (r.dark == 0) set_status(e, "%s: lit", r.name);
+                else if (r.dark == 255) set_status(e, "%s: always dark", r.name);
+                else set_status(e, "%s: dark until flag %d", r.name, r.dark);
+            }
         }
         // Preview the lair as it is at a given hole (0 = show everything).
         if (kp[SC_COMMA])  e.preview_hole = (uint8_t)(e.preview_hole == 0 ? kHoles : e.preview_hole - 1);
@@ -579,6 +615,7 @@ void editor_tick(GameState& s, float dt) {
             if (tile_is_spike(t)) { e.spike_dir = t; t = T_SPIKE_U; }
             for (int i = 0; i < kPaletteN; ++i) if (kPalette[i] == t) e.brush = i;
             tile_tags(s.world, mtx, mty, &e.hole_from, &e.hole_until);   // tags come along
+            { uint8_t c = tile_cond(s.world, mtx, mty); e.flag_brush = (uint8_t)cond_flag(c); e.flag_not = (c & kCondNot) != 0; }
             set_status(e, "picked %s", kTileInfo[picked].name);
         } else if ((lp || rp) && shift) {
             e.rect_drag = true;
@@ -731,8 +768,19 @@ void render_editor(GameState& s) {
         for (int j = 0; j < ny; ++j)
             for (int i = 0; i < nx; ++i) {
                 int tx = tx0 + i, ty = ty0 + j;
-                uint8_t from, until;
+                uint8_t from, until, cond = tile_cond(s.world, tx, ty);
                 tile_tags(s.world, tx, ty, &from, &until);
+                if (cond) {
+                    float cpx = (float)(tx * kTile), cpy = (float)(ty * kTile);
+                    bool target = cond_is_target(tile_raw(s.world, tx, ty));
+                    wrect(cpx, cpy + kTile - 5, 5, 5, target ? rgba(255, 210, 60, 230) : rgba(90, 160, 255, 230));
+                    if (tile_px >= 28 && labels < 80) {
+                        ++labels;
+                        char lb[16];
+                        std::snprintf(lb, sizeof(lb), "%sF%d", target ? ">" : ((cond & kCondNot) ? "!" : ""), cond_flag(cond));
+                        text_sh(to_sx(cpx + kTile) - 7 * char_w() * 0.5f, to_sy(cpy) + 12, rgba(160, 200, 255), font_small(), lb);
+                    }
+                }
                 if (!from && !until) continue;
                 float px = (float)(tx * kTile), py = (float)(ty * kTile);
                 bool present = e.preview_hole == 0 || hole_allows(e.preview_hole, from, until);
@@ -818,7 +866,9 @@ void render_editor(GameState& s) {
         if (hf || hu) std::snprintf(hov, sizeof(hov), "   hovered tile: from %d until %d", hf, hu);
         char prev[24] = "all holes";
         if (e.preview_hole) std::snprintf(prev, sizeof(prev), "hole %d", e.preview_hole);
-        std::snprintf(buf, sizeof(buf), "brush: %s  ([ ] / Shift)   |   preview: %s  (, .)%s", tags, prev, hov);
+        char fl[24] = "no flag";
+        if (e.flag_brush) std::snprintf(fl, sizeof(fl), "%sflag %d", e.flag_not ? "NOT " : "", e.flag_brush);
+        std::snprintf(buf, sizeof(buf), "brush: %s, %s  ([ ] Shift, - = \\)   |   preview: %s  (, .)%s", tags, fl, prev, hov);
         srect(0, line_h() + 8 * g_ui, W, line_h(), rgba(20, 18, 32, 200));
         text(8 * g_ui, 2 * line_h() + 4 * g_ui,
              (e.hole_from || e.hole_until || e.preview_hole) ? rgba(140, 240, 160) : rgba(170, 170, 190),
@@ -851,6 +901,9 @@ void render_editor(GameState& s) {
             "[ / ]       brush: appears from hole N",
             "Shift+[ / ] brush: gone from hole N",
             ", / .       preview the lair at a hole",
+            "- / =       brush flag (switch target /",
+            "  \\         present-if-flag; \\ = NOT)",
+            "L (rooms)   room dark / dark until flag",
             "",
             "PLAY  move   WASD / arrows",
             "      jump   Space / C / K",

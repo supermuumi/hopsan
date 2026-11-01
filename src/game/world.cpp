@@ -52,6 +52,7 @@ Chunk* chunk_get_or_create(ChunkMap& m, int cx, int cy) {
             std::memset(c.t, 0, sizeof(c.t));
             std::memset(c.from, 0, sizeof(c.from));
             std::memset(c.until, 0, sizeof(c.until));
+            std::memset(c.cond, 0, sizeof(c.cond));
             m.hash[s] = ++m.count;
             return &c;
         }
@@ -83,17 +84,29 @@ void tile_tags(const World& w, int tx, int ty, uint8_t* from, uint8_t* until) {
     *until = c ? c->until[chunk_index(tx, ty)] : 0;
 }
 
+uint8_t tile_cond(const World& w, int tx, int ty) {
+    Chunk* c = chunk_find(const_cast<ChunkMap&>(w.map), tx >> kChunkShift, ty >> kChunkShift);
+    return c ? c->cond[chunk_index(tx, ty)] : 0;
+}
+
+bool cond_allows(uint32_t flags, uint8_t t, uint8_t cond) {
+    if (!cond || cond_is_target(t)) return true;
+    bool set = (flags >> cond_flag(cond)) & 1u;
+    return (cond & kCondNot) ? !set : set;
+}
+
 // The tile as the game sees it: hidden if its golf-hole tags exclude the
-// current hole (w.gate_hole).
+// current hole (w.gate_hole), or its flag condition isn't met (play only).
 uint8_t tile_get(const World& w, int tx, int ty) {
     Chunk* c = chunk_find(const_cast<ChunkMap&>(w.map), tx >> kChunkShift, ty >> kChunkShift);
     if (!c) return T_EMPTY;
     int i = chunk_index(tx, ty);
     if (w.gate_hole > 0 && !hole_allows(w.gate_hole, c->from[i], c->until[i])) return T_EMPTY;
+    if (w.gate_use_flags && !cond_allows(w.gate_flags, c->t[i], c->cond[i])) return T_EMPTY;
     return c->t[i];
 }
 
-void tile_set_full(World& w, int tx, int ty, uint8_t t, uint8_t from, uint8_t until) {
+void tile_set_full(World& w, int tx, int ty, uint8_t t, uint8_t from, uint8_t until, uint8_t cond = 0) {
     bool empty = t == T_EMPTY;
     Chunk* c = empty
         ? chunk_find(w.map, tx >> kChunkShift, ty >> kChunkShift)
@@ -103,6 +116,7 @@ void tile_set_full(World& w, int tx, int ty, uint8_t t, uint8_t from, uint8_t un
     c->t[i] = t;
     c->from[i] = empty ? 0 : from;
     c->until[i] = empty ? 0 : until;
+    c->cond[i] = empty ? 0 : cond;
 }
 
 void tile_set(World& w, int tx, int ty, uint8_t t) { tile_set_full(w, tx, ty, t, 0, 0); }
@@ -187,7 +201,9 @@ bool world_save(const World& w, const char* path) {
     for (int i = 0; i < w.room_count; ++i) {
         const Room& r = w.rooms[i];
         if (!r.used) continue;
-        std::fprintf(f, "room %d %d %d %d %s\n", r.x, r.y, r.w, r.h, r.name[0] ? r.name : "room");
+        std::fprintf(f, "room %d %d %d %d %s", r.x, r.y, r.w, r.h, r.name[0] ? r.name : "room");
+        if (r.dark) std::fprintf(f, " dark %d", r.dark);
+        std::fputc('\n', f);
         for (int y = 0; y < r.h; ++y) {
             for (int x = 0; x < r.w; ++x) {
                 uint8_t t = tile_raw(w, r.x + x, r.y + y);
@@ -197,12 +213,12 @@ bool world_save(const World& w, const char* path) {
             line[r.w + 1] = 0;
             std::fputs(line, f);
         }
-        // Golf-hole tags, room-relative: hole <x> <y> <from> <until>
+        // Per-tile tags, room-relative: tag <x> <y> <from hole> <until hole> <flag cond>
         for (int y = 0; y < r.h; ++y)
             for (int x = 0; x < r.w; ++x) {
-                uint8_t from, until;
+                uint8_t from, until, cond = tile_cond(w, r.x + x, r.y + y);
                 tile_tags(w, r.x + x, r.y + y, &from, &until);
-                if (from || until) std::fprintf(f, "hole %d %d %d %d\n", x, y, from, until);
+                if (from || until || cond) std::fprintf(f, "tag %d %d %d %d %d\n", x, y, from, until, cond);
             }
         std::fputc('\n', f);
         ++saved;
@@ -238,17 +254,22 @@ bool world_load(World& w, const char* path) {
     int last_x = 0, last_y = 0;
     bool have_room = false;
     while (std::fgets(line, sizeof(line), f)) {
-        int hx, hy, hf, hu;
-        if (have_room && std::sscanf(line, "hole %d %d %d %d", &hx, &hy, &hf, &hu) == 4) {
+        int hx, hy, hf, hu, hc = 0;
+        bool is_tag = have_room && std::sscanf(line, "tag %d %d %d %d %d", &hx, &hy, &hf, &hu, &hc) == 5;
+        bool is_hole = !is_tag && have_room && std::sscanf(line, "hole %d %d %d %d", &hx, &hy, &hf, &hu) == 4;
+        if (is_tag || is_hole) {
             uint8_t t = tile_raw(w, last_x + hx, last_y + hy);
             if (t != T_EMPTY)
-                tile_set_full(w, last_x + hx, last_y + hy, t, (uint8_t)clampi(hf, 0, kHoles), (uint8_t)clampi(hu, 0, kHoles));
+                tile_set_full(w, last_x + hx, last_y + hy, t, (uint8_t)clampi(hf, 0, kHoles),
+                              (uint8_t)clampi(hu, 0, kHoles), (uint8_t)clampi(hc, 0, 255));
             continue;
         }
         if (std::strncmp(line, "room ", 5) != 0) continue;
         Room r{};
         char name[64] = "room";
-        int n = std::sscanf(line + 5, "%d %d %d %d %63s", &r.x, &r.y, &r.w, &r.h, name);
+        int dark = 0;
+        int n = std::sscanf(line + 5, "%d %d %d %d %63s dark %d", &r.x, &r.y, &r.w, &r.h, name, &dark);
+        r.dark = (uint8_t)clampi(dark, 0, 255);
         if (n < 4 || r.w <= 0 || r.h <= 0 || r.w > kRoomMaxW || r.h > kRoomMaxH) {
             logf(LOG_LEVEL_WARN, "load: bad room line: %s", line);
             continue;

@@ -25,7 +25,7 @@ constexpr const char* kTag = "game";
 // Bump whenever GameState's layout changes so a hot reload re-initialises
 // instead of reading garbage.
 constexpr uint32_t kStateMagic   = 0x484F5053u; // 'HOPS'
-constexpr uint32_t kStateVersion = 9;
+constexpr uint32_t kStateVersion = 10;
 
 // ---- Units ---------------------------------------------------------------
 // World units are pixels of the virtual screen. One tile is kTile pixels.
@@ -80,6 +80,16 @@ enum Tile : uint8_t {
     T_CONVEYOR_R,    // solid, carries you right
     T_DRONE_H,       // security drone, patrols horizontally
     T_DRONE_V,       // security drone, patrols vertically
+    // Switches + reactions
+    T_SWITCH,        // lever: touching it sets its flag (tile cond = flag id)
+    T_LAVA,          // flows, ignites, turns to basalt on water, cools to basalt
+    T_WOOD,          // solid crate / barricade, flammable
+    T_FIRE,          // burning tile (runtime; burns out to nothing)
+    T_BASALT,        // solid, made by lava meeting water or cooling
+    T_CAULDRON,      // solid pot of lava; push or dash into it to tip it
+    T_CAULDRON_TIPPED,
+    T_CABLE,         // live wire: lethal, electrifies water it touches, flammable
+    T_FUSE,          // wick: burns fast; when it burns out it sets its flag (cond)
     T_COUNT
 };
 
@@ -127,6 +137,15 @@ constexpr TileInfo kTileInfo[T_COUNT] = {
     { '}', "conveyor R", rgba(80, 80, 96)        },
     { 'D', "drone H",    rgba(200, 60, 60)       },
     { 'd', "drone V",    rgba(200, 60, 60)       },
+    { '/', "switch",     rgba(230, 200, 60)      },
+    { '&', "lava",       rgba(255, 110, 30)      },
+    { 'W', "wood crate", rgba(150, 100, 56)      },
+    { '!', "fire",       rgba(255, 170, 40)      },
+    { 'o', "basalt",     rgba(58, 52, 64)        },
+    { 'U', "cauldron",   rgba(40, 40, 46)        },
+    { 'u', "tipped cauldron", rgba(40, 40, 46)   },
+    { 'z', "live cable", rgba(250, 230, 90)      },
+    { 'i', "fuse",       rgba(170, 130, 80)      },
 };
 
 inline bool tile_is_spike(uint8_t t) { return t >= T_SPIKE_U && t <= T_SPIKE_R; }
@@ -134,6 +153,10 @@ inline bool tile_is_decor(uint8_t t) { return t >= T_DECOR_GRASS && t <= T_DECOR
 inline bool tile_is_laser(uint8_t t) { return t == T_LASER || t == T_LASER_A || t == T_LASER_B; }
 inline bool tile_is_water(uint8_t t) { return t == T_WATER || t == T_SHARK; }
 inline int  conveyor_dir(uint8_t t)  { return t == T_CONVEYOR_L ? -1 : (t == T_CONVEYOR_R ? 1 : 0); }
+inline bool tile_is_flammable(uint8_t t) {
+    return t == T_WOOD || t == T_FUSE || t == T_CABLE || t == T_ONEWAY || t == T_DECOR_GRASS
+        || t == T_DECOR_FERN || t == T_DECOR_SHROOMS || t == T_DECOR_VINES;
+}
 
 // ---- World storage -------------------------------------------------------
 // Tiles live in one global sparse grid of 32x32 chunks so rooms can sit
@@ -155,7 +178,16 @@ struct Chunk {
     uint8_t t[kChunk * kChunk];
     uint8_t from[kChunk * kChunk];
     uint8_t until[kChunk * kChunk];
+    // World-flag condition: 1..31 = present while that flag is set,
+    // 129..159 (bit 7) = present while it is NOT set. For switches and
+    // fuses it's instead the flag they set (low 5 bits).
+    uint8_t cond[kChunk * kChunk];
 };
+
+constexpr int     kMaxFlags   = 31;
+constexpr uint8_t kCondNot    = 0x80;
+inline int  cond_flag(uint8_t c) { return c & 0x1F; }
+inline bool cond_is_target(uint8_t t) { return t == T_SWITCH || t == T_FUSE; }
 
 struct ChunkMap {
     int32_t count;
@@ -168,11 +200,14 @@ constexpr int kMaxRooms = 512;
 struct Room {
     int32_t x, y, w, h;   // in tiles
     bool    used;
-    char    name[31];
+    uint8_t dark;         // 0 = lit, 255 = always dark, N = dark until flag N is set
+    char    name[30];
 };
 
 struct World {
     int32_t  gate_hole;      // > 0: tile_get hides tiles not present at this hole
+    bool     gate_use_flags; // tile_get applies flag conditions (play mode)
+    uint32_t gate_flags;     // bit N = flag N set
     ChunkMap map;
     int32_t  room_count;   // high-water mark; slots may be unused
     Room     rooms[kMaxRooms];
@@ -324,6 +359,31 @@ struct Play {
     float    card_t;
     float    card_exit_t;
 
+    // World flags (switches, fuses). Permanent once set; saved in progress.
+    uint32_t flags;
+
+    // Camera "peek" at the room a flag change affected (pauses the sim).
+    int32_t  peek_room;          // -1 = none
+    float    peek_t;
+    float    peek_from_x, peek_from_y;
+
+    // Reactions: the current room's tiles are snapshotted when it's built
+    // and restored on death / leaving, so lava, fire etc. always reset.
+    bool     snap_valid;
+    int32_t  snap_x, snap_y, snap_w, snap_h;
+    uint8_t  snap_t[kRoomMaxW * kRoomMaxH];
+    uint8_t  snap_from[kRoomMaxW * kRoomMaxH];
+    uint8_t  snap_until[kRoomMaxW * kRoomMaxH];
+    uint8_t  snap_cond[kRoomMaxW * kRoomMaxH];
+    uint8_t  cell_timer[kRoomMaxW * kRoomMaxH];   // fire burn / lava cooling
+    int8_t   cell_dir[kRoomMaxW * kRoomMaxH];     // lava flow direction
+    uint8_t  cell_aux[kRoomMaxW * kRoomMaxH];     // fire: what's burning; water: electrified
+    int32_t  react_tick;
+    float    react_accum;
+    struct Emitter { int32_t x, y; int8_t dir; int16_t left; } emitters[16];
+    int32_t  emitter_count;
+    float    push_timer;
+
     float   cam_x, cam_y;     // top-left of the view, world px
     bool    transitioning;
     float   trans_t;
@@ -354,6 +414,7 @@ struct TileChange {
     int32_t x, y;
     uint8_t before, after;
     uint8_t before_from, before_until, after_from, after_until;
+    uint8_t before_cond, after_cond;
 };
 struct RoomChange { int32_t idx; Room before, after; };
 struct UndoOp     { int32_t tile_begin, tile_end, room_begin, room_end; };
@@ -422,6 +483,9 @@ struct Editor {
     uint8_t hole_from;
     uint8_t hole_until;
     uint8_t preview_hole;
+    uint8_t flag_brush;      // 0 = none, else flag 1..31 for the brush's condition / switch target
+    bool    flag_not;        // brush condition is "present while flag NOT set"
+    uint8_t scratch_cond[kRoomMaxW * kRoomMaxH];
 };
 
 // ---- Top level -----------------------------------------------------------

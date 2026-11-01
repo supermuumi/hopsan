@@ -13,6 +13,7 @@ struct View {
 };
 
 View            g_view;
+int             g_live_room = -1;   // play: entity tiles in this room are drawn live, not as tiles
 RenderCommands* g_out = nullptr;
 int             g_ui  = 1;        // UI scale: 2 on hi-dpi windows
 
@@ -153,6 +154,8 @@ constexpr uint32_t kSteelDark = rgba(130, 138, 160);
 
 bool is_solid_tile(uint8_t t) { return t == T_ROCK || t == T_BRICK; }
 
+// Defined in react.cpp (included after this file).
+void draw_react_tile(uint8_t t, int tx, int ty);
 // Defined in hazards.cpp (included after this file).
 void draw_hazard_static(GameState& s, uint8_t t, int tx, int ty);
 void draw_conveyor(int tx, int ty, int dir, float t);
@@ -449,6 +452,10 @@ void draw_tile_static(const World& w, uint8_t t, int tx, int ty, float alpha_ent
         case T_LASER: case T_LASER_A: case T_LASER_B: case T_SHARK: case T_DRONE_H: case T_DRONE_V:
             draw_hazard_static(*g_state, t, tx, ty);
             break;
+        case T_SWITCH: case T_LAVA: case T_WOOD: case T_FIRE: case T_BASALT: case T_CAULDRON:
+        case T_CAULDRON_TIPPED: case T_CABLE: case T_FUSE:
+            draw_react_tile(t, tx, ty);
+            break;
         default:
             if (tile_is_decor(t)) {
                 // A tile holds one thing, so a decoration placed in a
@@ -528,6 +535,10 @@ void draw_tiles(const World& w, bool skip_entities, int pass) {
             uint8_t t = tile_get(w, tx, ty);
             if (t == T_EMPTY || t >= T_COUNT) continue;
             if (!tile_in_pass(t, pass)) continue;
+            if (!skip_entities && g_live_room >= 0 && tile_is_entity(t)) {
+                const Room& lr = w.rooms[g_live_room];
+                if (tx >= lr.x && tx < lr.x + lr.w && ty >= lr.y && ty < lr.y + lr.h) continue;
+            }
             if (skip_entities && tile_is_entity(t)) continue;
             draw_tile_static(w, t, tx, ty, skip_entities ? 0.0f : 1.0f);
         }

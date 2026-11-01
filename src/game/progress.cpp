@@ -31,6 +31,7 @@ void progress_save(const GameState& s) {
     FILE* f = std::fopen(kProgressPath, "wb");
     if (!f) { logf(LOG_LEVEL_ERROR, "can't write %s", kProgressPath); return; }
     std::fprintf(f, "hopsan progress v1\n");
+    std::fprintf(f, "flags %u\n", g.flags);
     for (int i = 0; i < g.star_count; ++i) std::fprintf(f, "star %d %d\n", g.stars[i].x, g.stars[i].y);
     std::fclose(f);
 }
@@ -39,11 +40,14 @@ void progress_load(GameState& s) {
     Play& g = s.play;
     g.star_count = 0;
     g.pending_count = 0;
+    g.flags = 0;
     FILE* f = std::fopen(kProgressPath, "rb");
     if (!f) return;
     char line[128];
     while (std::fgets(line, sizeof(line), f)) {
         int a = 0, b = 0;
+        unsigned fl = 0;
+        if (std::sscanf(line, "flags %u", &fl) == 1) { g.flags = fl; continue; }
         if (std::sscanf(line, "star %d %d", &a, &b) == 2 && g.star_count < kMaxStars)
             g.stars[g.star_count++] = StarPos{ a, b };
     }
@@ -80,6 +84,8 @@ void progress_reset(GameState& s) {
     g.star_count = g.pending_count = 0;
     g.hole = g.hole_target = 1;
     g.finale_seen = false;
+    g.flags = 0;
+    s.world.gate_flags = 0;
     g.card_kind = g.card_next = 0;
     progress_save(s);
 }
