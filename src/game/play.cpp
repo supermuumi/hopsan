@@ -54,8 +54,6 @@ constexpr float kWalkerSpeed     = 32.0f;
 constexpr float kTransitionTime  = 0.35f;
 constexpr float kDeathTime       = 0.6f;
 
-constexpr uint32_t kHairDash   = rgba(230, 72, 92);
-constexpr uint32_t kHairNoDash = rgba(90, 160, 255);
 
 // ---- Random + particles --------------------------------------------------
 
@@ -287,9 +285,14 @@ void die(GameState& s) {
     g.deaths++;
     g.shake = 0.3f;
     float cx = (float)g.p.x + kPlayerW * 0.5f, cy = (float)g.p.y + kPlayerH * 0.5f;
-    uint32_t hair = g.p.dashes > 0 ? kHairDash : kHairNoDash;
-    burst(g, cx, cy, 18, 220, 0.6f, hair, 3);
-    burst(g, cx, cy, 10, 120, 0.5f, rgba(255, 255, 255), 2);
+    // A flurry of paperwork.
+    for (int i = 0; i < 18; ++i) {
+        float a = frand(g) * 6.2831853f, sp = frand_range(g, 80, 220);
+        Particle& pp = spawn_particle(g, cx, cy, std::cos(a) * sp, std::sin(a) * sp - 60,
+                                      frand_range(g, 0.6f, 1.0f), 2, rgba(244, 244, 248), 260, 5.0f);
+        pp.w = 2.5f; pp.h = 3.0f;
+    }
+    burst(g, cx, cy, 8, 120, 0.4f, rgba(40, 54, 104), 2);
 }
 
 // ---- Camera --------------------------------------------------------------
@@ -582,7 +585,7 @@ void player_update(GameState& s, float dt) {
         if (p.trail_timer <= 0) {
             p.trail_timer = 0.035f;
             Particle& gp = spawn_particle(g, (float)p.x, (float)p.y, 0, 0, 0.25f, 0,
-                                          with_alpha(kHairNoDash, 0.55f));
+                                          with_alpha(rgba(70, 90, 160), 0.5f));
             gp.w = kPlayerW; gp.h = kPlayerH;
         }
         // Jumping out of a grounded dash keeps the dash speed: a long jump.
@@ -1037,38 +1040,77 @@ void play_tick(GameState& s, float dt) {
 
 // ---- Rendering -----------------------------------------------------------
 
+// The PA: neat bob with a bun, glasses, navy blazer over a white shirt and
+// red tie, clipboard held out front. The papers on the clipboard show your
+// dash: there when it's ready, gone once you've dashed.
 void draw_player(GameState& s) {
     Play& g = s.play;
     Player& p = g.p;
     if (g.dying) return;
     // Drawn at the sub-pixel position (snapped to the art-pixel grid by
-    // wrect), which is twice as fine as the collision grid.
+    // wrect), which is twice as fine as the collision grid. Local space:
+    // u = -5..5 across the hitbox, v = -18..0 up from the feet.
     float cx = (float)p.x + p.rx + kPlayerW * 0.5f;
     float by = (float)p.y + p.ry + kPlayerH;
     float sx = p.squash_x, sy = p.squash_y;
-    auto pr = [&](float u, float v, float w, float h, uint32_t c) {
-        wrect(cx + u * sx, by + v * sy, w * sx, h * sy, c);
-    };
-    uint32_t hair = p.dashes > 0 ? kHairDash : kHairNoDash;
-    if (p.state == PS_CLIMB && p.stamina < kStaminaWarn && ((int)(g.time * 10) & 1)) hair = rgba(255, 255, 255);
-    uint32_t cloak = rgba(64, 74, 128), legs = rgba(36, 36, 58), skin = rgba(244, 214, 186);
     float f = (float)p.facing;
+    // Mirror horizontally when facing left.
+    auto pr = [&](float u, float v, float w, float h, uint32_t c) {
+        float uu = f > 0 ? u : -u - w;
+        wrect(cx + uu * sx, by + v * sy, w * sx, h * sy, c);
+    };
+    const uint32_t shoes = rgba(22, 22, 28), trousers = rgba(52, 54, 68);
+    uint32_t blazer = rgba(40, 54, 104);
+    const uint32_t shirt = rgba(236, 236, 242), tie = rgba(204, 44, 56);
+    const uint32_t skin = rgba(244, 214, 186), hair = rgba(62, 42, 36);
+    const uint32_t frames = rgba(26, 26, 34), glint = rgba(180, 220, 250);
+    const uint32_t board = rgba(156, 110, 62), clip = rgba(200, 204, 214);
+    const uint32_t paper = rgba(244, 244, 248), ink = rgba(70, 110, 190);
+    bool tired = p.state == PS_CLIMB && p.stamina < kStaminaWarn && ((int)(g.time * 10) & 1);
+    if (tired) blazer = rgba(150, 160, 210);   // flashing: about to lose grip
 
+    // Clipboard behind the body while climbing (hands are on the wall).
+    auto clipboard = [&](float u) {
+        pr(u, -12, 3.5f, 5, board);
+        pr(u + 1, -12.5f, 1.5f, 1, clip);
+        if (p.dashes > 0) {
+            pr(u + 0.5f, -11.5f, 2.5f, 4, paper);
+            pr(u + 1, -10.5f, 1.5f, 0.5f, ink);
+            pr(u + 1, -9.5f, 1.5f, 0.5f, ink);
+            pr(u + 1, -8.5f, 1, 0.5f, ink);
+        }
+    };
+    if (p.state == PS_CLIMB) clipboard(-7.0f);
+
+    // Legs + shoes (alternate while running).
     int step = p.run_anim > 0 ? ((int)p.run_anim & 1) : 0;
-    pr(-4, -5 + (step ? 1.0f : 0.0f), 3, 5 - (step ? 1.0f : 0.0f), legs);
-    pr(1, -5 + (step ? 0.0f : 1.0f), 3, 5 - (step ? 0.0f : 1.0f), legs);
-    pr(-5, -11, 10, 7, cloak);
-    pr(-5, -6, 10, 1, shade(cloak, 0.75f));
-    pr(-4, -16, 8, 6, skin);
-    pr(-5, -18, 10, 3, hair);
-    // hair tail streams behind
-    float tail_u = f > 0 ? -7.0f : 3.0f;
-    float lift = p.vy < -40 ? 2.0f : (p.vy > 40 ? -1.0f : 0.0f);
-    pr(tail_u, -17 + lift, 4, 4, hair);
-    pr(f > 0 ? -8.0f : 5.0f, -15 + lift * 1.5f, 3, 3, hair);
-    // eye
-    pr(f > 0 ? 1.0f : -2.0f, -14, 1, 2, rgba(30, 24, 40));
-    if (p.state == PS_CLIMB) pr(f > 0 ? 4.0f : -6.0f, -11, 2, 3, skin);   // hand on wall
+    float la = step ? 1.0f : 0.0f, lb = step ? 0.0f : 1.0f;
+    pr(-3.5f, -6 + la, 2.5f, 5 - la, trousers);
+    pr(1, -6 + lb, 2.5f, 5 - lb, trousers);
+    pr(-4, -1 + la * 0, 3, 1, shoes);
+    pr(1, -1, 3.5f, 1, shoes);
+    // Blazer, shirt, tie.
+    pr(-4.5f, -12, 9, 6.5f, blazer);
+    pr(-4.5f, -6, 9, 0.5f, shade(blazer, 0.7f));
+    pr(-1, -12, 2.5f, 2.5f, shirt);
+    pr(0, -11.5f, 1, 4, tie);
+    // Head.
+    pr(-3.5f, -17, 7, 5, skin);
+    // Hair: a neat bob, darker at the back, with a bun.
+    pr(-4, -18.5f, 8, 2, hair);
+    pr(-4, -17, 2, 3.5f, hair);
+    pr(-5.5f, -20, 2.5f, 2.5f, hair);
+    pr(1.5f, -17, 2, 0.5f, hair);       // fringe
+    // Glasses on the facing side.
+    pr(0.5f, -15, 3, 1.5f, frames);
+    pr(1, -14.5f, 2, 0.5f, glint);
+    pr(-0.5f, -14.5f, 1, 0.5f, frames); // arm of the glasses
+    if (p.state == PS_CLIMB) {
+        pr(4.5f, -12, 1.5f, 2, skin);   // hand on the wall
+    } else {
+        clipboard(3.0f);
+        pr(2.5f, -9, 1, 1, skin);       // hand holding it
+    }
 }
 
 void draw_particles(Play& g) {

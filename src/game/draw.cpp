@@ -421,7 +421,8 @@ void draw_start_marker(float px, float py) {
     float x = px + (16 - kPlayerW) * 0.5f;
     float y = py + 16 - kPlayerH;
     wrect(x, y, kPlayerW, kPlayerH, rgba(255, 255, 255, 70));
-    wrect(x, y, kPlayerW, 4, rgba(220, 70, 90, 160));
+    wrect(x, y, kPlayerW, 3, rgba(62, 42, 36, 180));          // hair
+    wrect(x, y + 6, kPlayerW, 6, rgba(40, 54, 104, 160));     // blazer
 }
 
 // Static look of any tile (used by the editor for every tile, and by play

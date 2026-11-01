@@ -42,6 +42,9 @@ of `src/game/*`.
 - Moveset: run, variable jump, coyote + buffer, wall slide / jump, 8-way
   dash (1 charge, refills on ground / crystal / spring), climb with stamina.
   No attacks yet (deliberately).
+- Player look: the PA, drawn procedurally in `draw_player` (bob + bun,
+  glasses, navy blazer, white shirt, red tie, clipboard). Dash readiness is
+  shown by papers on the clipboard (not hair colour; avoid Celeste look-alikes).
 - Plan pieces (code: stars): collectibles, counted once per save. Pickups in a room commit
   on leaving the room or touching a checkpoint; death rolls them back.
   (Helper double jump / charged super jump were tried and shelved.)

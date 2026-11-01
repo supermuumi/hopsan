@@ -159,7 +159,9 @@ Art scale: a tile is 32x32 art pixels (16 world units, so 2 art px per world
 unit). Terrain edges are built at runtime from the textures: an outline +
 shading on exposed sides and moss on exposed tops, so any shape of terrain
 works without hand-made edge tiles. If the atlas is missing the game falls
-back to the built-in placeholder art. The player is still placeholder art.
+back to the built-in placeholder art. The player (the PA: glasses, bun, navy
+blazer, red tie) is drawn in code; the papers on their clipboard show
+whether the dash is ready.
 
 ## Level editor (Tab)
 
