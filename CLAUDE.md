@@ -40,8 +40,14 @@ of `src/game/*`.
   fill; cauldron emitters). Resting water never moves, so closed pools are
   stable. Ice is solid, slippery and unclimbable. The room's tiles are snapshotted on build and
   restored on death / leaving / entering the editor / saving.
+  Destroying the last tile of a group tagged "NOT flag N" (burnt / thawed)
+  sets flag N (`group_destroyed`), so solved rooms stay solved after the
+  reset; tag the result tiles "flag N" (e.g. the Lab's bridge). The sim
+  sees tiles hidden by tags as empty (`Cells::raw` uses `tile_get`).
   Level-design rules: plan pieces must never be destroyable; every room
-  must stay reachable for every reachable combination of holes + flags.
+  must stay reachable for every reachable combination of holes + flags;
+  any reaction that opens the only way back must be made permanent this
+  way (otherwise leaving + returning can trap the player).
 - Graded endings (not implemented yet) come from a second, optional
   collectible (the boss's silly laser add-ons), never from missing
   required pieces.

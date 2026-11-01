@@ -136,7 +136,11 @@ void react_restore(GameState& s) {
     for (int y = 0; y < g.snap_h; ++y)
         for (int x = 0; x < g.snap_w; ++x) {
             int i = y * g.snap_w + x;
-            if (tile_raw(s.world, g.snap_x + x, g.snap_y + y) == g.snap_t[i]) continue;
+            int wx = g.snap_x + x, wy = g.snap_y + y;
+            uint8_t f, u;
+            tile_tags(s.world, wx, wy, &f, &u);
+            if (tile_raw(s.world, wx, wy) == g.snap_t[i] && f == g.snap_from[i] && u == g.snap_until[i]
+                && tile_cond(s.world, wx, wy) == g.snap_cond[i]) continue;   // unchanged (tags included)
             tile_set_full(s.world, g.snap_x + x, g.snap_y + y, g.snap_t[i], g.snap_from[i], g.snap_until[i], g.snap_cond[i]);
         }
     g.snap_valid = false;
@@ -160,7 +164,10 @@ struct Cells {
     int x0, y0, w, h;
     bool in(int x, int y) const { return x >= x0 && x < x0 + w && y >= y0 && y < y0 + h; }
     int idx(int x, int y) const { return (y - y0) * w + (x - x0); }
-    uint8_t raw(int x, int y) const { return in(x, y) ? tile_raw(s.world, x, y) : (uint8_t)T_ROCK; }
+    // The sim sees the world as the player does: tiles hidden by their hole /
+    // flag tags are empty space (and may be overwritten; the room snapshot
+    // restores them).
+    uint8_t raw(int x, int y) const { return in(x, y) ? tile_get(s.world, x, y) : (uint8_t)T_ROCK; }
     void put(int x, int y, uint8_t t, uint8_t cond = 0) { tile_set_full(s.world, x, y, t, 0, 0, cond); }
 };
 
@@ -231,6 +238,18 @@ void flow_pass(GameState& s, Cells& c, uint8_t kind, uint8_t* moved) {
     }
 }
 
+// A tile tagged "present while flag N is NOT set" was burnt / melted away.
+// Once the last tile of that group in the room is gone, set flag N: the
+// group then stays gone for good, and anything tagged "present while flag N
+// is set" appears permanently (e.g. a bridge). That's how a room keeps the
+// result of a reaction after it resets.
+void group_destroyed(GameState& s, Cells& c, uint8_t cond) {
+    for (int y = c.y0; y < c.y0 + c.h; ++y)
+        for (int x = c.x0; x < c.x0 + c.w; ++x)
+            if (tile_cond(s.world, x, y) == cond && tile_get(s.world, x, y) != T_EMPTY) return;
+    flag_set(s, cond_flag(cond));
+}
+
 void ignite(Cells& c, int x, int y) {
     if (!c.in(x, y)) return;
     uint8_t t = c.raw(x, y);
@@ -238,7 +257,13 @@ void ignite(Cells& c, int x, int y) {
     Play& g = c.s.play;
     int i = c.idx(x, y);
     g.cell_aux[i] = t;
-    g.cell_dir[i] = (int8_t)(t == T_FUSE ? cond_flag(tile_cond(c.s.world, x, y)) : 0);
+    // Fuses remember the flag they set (+N). Anything tagged "present while
+    // flag N is NOT set" remembers -N, so destroying it can set flag N.
+    uint8_t cond = tile_cond(c.s.world, x, y);
+    int8_t mark = 0;
+    if (t == T_FUSE) mark = (int8_t)cond_flag(cond);
+    else if (cond & kCondNot) mark = (int8_t)-cond_flag(cond);
+    g.cell_dir[i] = mark;
     g.cell_timer[i] = (uint8_t)burn_ticks(t);
     c.put(x, y, T_FIRE);
 }
@@ -307,11 +332,14 @@ void react_tick(GameState& s) {
                     spawn_particle(g, x * kTile + 8.0f, y * kTile + 8.0f, frand_range(g, -10, 10), -30, 0.8f, 3,
                                    rgba(70, 70, 76, 180), -10, 1);
                     if (fuse && !doused) flag_set(s, f);
+                    if (!fuse && f < 0) group_destroyed(s, c, (uint8_t)(kCondNot | -f));
                 }
             } else if (t == T_ICE && g.cell_timer[i] > 0) {
                 // Thawing: turns to water, and the thaw spreads to touching ice.
                 if (++g.cell_timer[i] >= kThawTicks + 1) {
+                    uint8_t cond = tile_cond(s.world, x, y);
                     c.put(x, y, T_WATER);
+                    if (cond & kCondNot) group_destroyed(s, c, cond);
                     g.cell_timer[i] = 0; g.cell_dir[i] = 0; g.cell_aux[i] = 0;
                     for (auto& d : nb) start_thaw(s, c, x + d[0], y + d[1]);
                     spawn_particle(g, x * kTile + 8.0f, y * kTile + 8.0f, frand_range(g, -15, 15), frand_range(g, -40, -10),

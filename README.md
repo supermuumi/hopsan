@@ -147,6 +147,24 @@ time, and resets when you die or leave:
 
 Plan pieces are never destroyed by reactions.
 
+### Making a result permanent
+
+Rooms reset when you leave, so a reaction's result is gone when you come
+back. To keep it, use flags:
+
+- Tag the tiles that should be destroyed **"present while flag N is NOT
+  set"** (brush flag N + `\`). When the last tile of that group in the room
+  burns or melts away, flag N is set automatically, so the group stays
+  gone for good.
+- Tag anything the solution should leave behind **"present while flag N
+  is set"**. It appears once the puzzle is solved and stays.
+
+The Lab does this: its barricade is tagged NOT flag 3, and a basalt bridge
+over the pit is tagged flag 3. Once you've burnt the barricade, you can
+leave and come back and the way through stays open. Design rule: if a
+reaction opens the only way back from somewhere, make it permanent like
+this, or you can trap the player.
+
 ## The world
 
 - The world is made of **rooms**: rectangles of 16px tiles placed on one
