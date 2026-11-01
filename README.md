@@ -123,7 +123,9 @@ mushrooms, rubble, vines, chain, torch, pillar), and lair hazards:
   at the surface. Dash refills underwater.
 - **Sharks** (`K`, placed in water): patrol, and drift toward you when
   you're swimming nearby.
-- **Conveyor belts** (`{` left, `}` right): solid, carry you while standing.
+- **Conveyor belts** (`{` left, `}` right): solid, carry you at 60 px/s while
+  standing. Jumping or walking off keeps the belt's momentum, which fades
+  slowly in the air.
 - **Security drones** (`D` horizontal, `d` vertical): patrol until they hit a
   wall, spikes or the room edge. They fly through one-way platforms.
 

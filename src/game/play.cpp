@@ -296,8 +296,10 @@ void die(GameState& s) {
 
 void camera_target(GameState& s, int room, float* out_x, float* out_y) {
     Play& g = s.play;
-    float tx = (float)g.p.x + kPlayerW * 0.5f - kViewW * 0.5f;
-    float ty = (float)g.p.y + kPlayerH * 0.5f - kViewH * 0.5f - 8.0f;
+    // Sub-pixel position, so a slowly moving player doesn't make the
+    // camera step unevenly.
+    float tx = (float)g.p.x + g.p.rx + kPlayerW * 0.5f - kViewW * 0.5f;
+    float ty = (float)g.p.y + g.p.ry + kPlayerH * 0.5f - kViewH * 0.5f - 8.0f;
     if (room >= 0) {
         const Room& r = s.world.rooms[room];
         float rx0 = (float)(r.x * kTile), ry0 = (float)(r.y * kTile);
@@ -464,6 +466,7 @@ void move_x(GameState& s, float amount) {
         }
         if (corrected) continue;
         p.vx = 0;
+        p.carry_vx = 0;
         p.rx = 0;
         break;
     }
@@ -550,6 +553,19 @@ void player_update(GameState& s, float dt) {
     } else {
         p.coyote -= dt;
     }
+
+    // Conveyor momentum: set while standing on a belt, kept when you jump
+    // or walk off (fading slowly in the air), cleared on other ground.
+    if (p.on_ground) {
+        int ty = floordiv(p.y + kPlayerH, kTile);
+        int belt = 0;
+        for (int tx = floordiv(p.x, kTile); tx <= floordiv(p.x + kPlayerW - 1, kTile); ++tx)
+            if (int d = conveyor_dir(tile_get(s.world, tx, ty))) belt = d;
+        p.carry_vx = (float)belt * kConveyorSpeed;
+    } else {
+        p.carry_vx = approach(p.carry_vx, 0, kCarryAirDrag * dt);
+    }
+    if (p.state == PS_CLIMB || p.state == PS_DASH) p.carry_vx = 0;
 
     if (p.force_move_timer > 0) mx = p.force_move_x;
     if (mx != 0 && p.state != PS_CLIMB) p.facing = (int8_t)mx;
@@ -698,17 +714,8 @@ void player_update(GameState& s, float dt) {
     }
     }
 
-    move_x(s, p.vx * dt);
+    move_x(s, (p.vx + p.carry_vx) * dt);
     move_y(s, p.vy * dt);
-
-    // Conveyor belts carry you while you stand on them.
-    if (p.state != PS_CLIMB && collide(s, p.x, p.y + 1)) {
-        int ty = floordiv(p.y + kPlayerH, kTile);
-        int carry = 0;
-        for (int tx = floordiv(p.x, kTile); tx <= floordiv(p.x + kPlayerW - 1, kTile); ++tx)
-            if (int d = conveyor_dir(tile_get(s.world, tx, ty))) carry = d;
-        if (carry) move_x(s, (float)carry * kConveyorSpeed * dt);
-    }
 
     // Touching crumble blocks starts them falling.
     if (collide(s, p.x, p.y + 1) && p.vy >= 0) trigger_crumbles_in_box(s, p.x, p.y + kPlayerH, kPlayerW, 1);
@@ -1034,8 +1041,10 @@ void draw_player(GameState& s) {
     Play& g = s.play;
     Player& p = g.p;
     if (g.dying) return;
-    float cx = (float)p.x + kPlayerW * 0.5f;
-    float by = (float)(p.y + kPlayerH);
+    // Drawn at the sub-pixel position (snapped to the art-pixel grid by
+    // wrect), which is twice as fine as the collision grid.
+    float cx = (float)p.x + p.rx + kPlayerW * 0.5f;
+    float by = (float)p.y + p.ry + kPlayerH;
     float sx = p.squash_x, sy = p.squash_y;
     auto pr = [&](float u, float v, float w, float h, uint32_t c) {
         wrect(cx + u * sx, by + v * sy, w * sx, h * sy, c);
@@ -1132,8 +1141,11 @@ void render_play(GameState& s) {
         shx = (frand(g) < 0.5f ? -1.0f : 1.0f) * (g.shake > 0.15f ? 2.0f : 1.0f);
         shy = (frand(g) < 0.5f ? -1.0f : 1.0f) * (g.shake > 0.15f ? 2.0f : 1.0f);
     }
-    g_view.cam_x = std::floor(g.cam_x + 0.5f) + shx;
-    g_view.cam_y = std::floor(g.cam_y + 0.5f) + shy;
+    // Snap the camera to whole screen pixels' worth of world: half world
+    // units (one art pixel) when the scale is even, whole units otherwise.
+    float cam_snap = (scale % 2 == 0) ? (float)kArtScale : 1.0f;
+    g_view.cam_x = std::floor(g.cam_x * cam_snap + 0.5f) / cam_snap + shx;
+    g_view.cam_y = std::floor(g.cam_y * cam_snap + 0.5f) / cam_snap + shy;
     g_view.scale = (float)scale;
     g_view.ox = (float)ox; g_view.oy = (float)oy;
     g_view.clip_x0 = (float)ox; g_view.clip_y0 = (float)oy;

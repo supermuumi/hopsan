@@ -16,7 +16,8 @@ constexpr int   kLaserMaxLen   = 64;     // tiles
 constexpr float kSharkSpeed    = 70.0f;
 constexpr float kSharkChase    = 40.0f;  // vertical tracking speed
 constexpr float kDroneSpeed    = 60.0f;
-constexpr float kConveyorSpeed = 70.0f;
+constexpr float kConveyorSpeed = 60.0f;  // = 1 px per 60 Hz step: perfectly even motion
+constexpr float kCarryAirDrag  = 30.0f;  // belt momentum fades this fast (px/s^2) in the air
 constexpr float kSwimSpeed     = 110.0f;
 constexpr float kSwimAccel     = 700.0f;
 constexpr float kSwimRise      = 25.0f;  // gentle float toward the surface

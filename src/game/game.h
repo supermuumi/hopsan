@@ -25,7 +25,7 @@ constexpr const char* kTag = "game";
 // Bump whenever GameState's layout changes so a hot reload re-initialises
 // instead of reading garbage.
 constexpr uint32_t kStateMagic   = 0x484F5053u; // 'HOPS'
-constexpr uint32_t kStateVersion = 7;
+constexpr uint32_t kStateVersion = 8;
 
 // ---- Units ---------------------------------------------------------------
 // World units are pixels of the virtual screen. One tile is kTile pixels.
@@ -256,6 +256,7 @@ struct Player {
     float   squash_x, squash_y;
     float   run_anim;
     float   slide_dust;
+    float   carry_vx;       // velocity from a conveyor belt; kept (and fading) in the air
 };
 
 // ---- Input ---------------------------------------------------------------
