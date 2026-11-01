@@ -21,7 +21,9 @@ void burst(Play& g, float x, float y, int n, float speed, float life, uint32_t c
 float frand_range(Play& g, float lo, float hi);
 
 constexpr float kReactStep    = 0.1f;   // 10 Hz
-constexpr int   kLavaCoolTicks = 30;    // a resting lava cell turns to basalt (3 s)
+constexpr int   kLavaCoolTicks = 30;    // a resting poured lava cell turns to basalt (3 s)
+constexpr int   kThawTicks     = 3;     // per ice cell; the thaw spreads cell to cell
+constexpr uint8_t kAuxPoured   = 1;     // cell_aux on lava: poured (cools); placed lava doesn't
 constexpr int   kCauldronPour  = 30;    // lava cells poured by a tipped cauldron
 constexpr float kPushToTip     = 0.25f; // seconds of pushing to tip a cauldron
 constexpr float kPeekTime      = 2.4f;
@@ -163,6 +165,71 @@ struct Cells {
 };
 
 bool liquid_can_enter(uint8_t t) { return t == T_EMPTY || tile_is_decor(t); }
+// Water also flows into fire (putting it out).
+bool water_can_enter(uint8_t t) { return liquid_can_enter(t) || t == T_FIRE; }
+
+void start_thaw(GameState& s, Cells& c, int x, int y) {
+    if (!c.in(x, y) || c.raw(x, y) != T_ICE) return;
+    uint8_t& tm = s.play.cell_timer[c.idx(x, y)];
+    if (tm == 0) tm = 1;
+}
+
+// One flow pass for a liquid. Each cell falls if it can; otherwise keeps
+// running in its flow direction; otherwise moves sideways if it's under
+// pressure (more of the same liquid above it) or can pour over an edge;
+// otherwise it rests. Resting water never moves again until something
+// changes around it, so designed pools stay perfectly still.
+void flow_pass(GameState& s, Cells& c, uint8_t kind, uint8_t* moved) {
+    Play& g = s.play;
+    auto can_enter = [&](int x, int y) {
+        if (!c.in(x, y)) return false;
+        uint8_t t = c.raw(x, y);
+        return kind == T_WATER ? water_can_enter(t) : liquid_can_enter(t);
+    };
+    bool ltr = (g.react_tick & 1) != 0;
+    for (int y = c.y0 + c.h - 1; y >= c.y0; --y) {
+        for (int k = 0; k < c.w; ++k) {
+            int x = ltr ? c.x0 + k : c.x0 + c.w - 1 - k;
+            int i = c.idx(x, y);
+            if (moved[i] || c.raw(x, y) != kind) continue;
+            int8_t dir = g.cell_dir[i];
+            int nx = x, ny = y;
+            bool pressured = kind == T_WATER && c.in(x, y - 1) && c.raw(x, y - 1) == T_WATER;
+            if (can_enter(x, y + 1)) ny = y + 1;
+            else if (dir && can_enter(x + dir, y)) nx = x + dir;
+            else {
+                dir = 0;
+                int first = ltr ? -1 : 1;
+                for (int d = first, n = 0; n < 2 && nx == x; ++n, d = -d)
+                    if (can_enter(x + d, y) && (pressured || can_enter(x + d, y + 1))) { nx = x + d; dir = (int8_t)d; }
+                // Water levels out: a surface cell sets off along the surface if
+                // there's a drop somewhere just ahead. (Always downhill, so it
+                // can't oscillate.)
+                if (kind == T_WATER && nx == x) {
+                    for (int d = first, n = 0; n < 2 && nx == x; ++n, d = -d) {
+                        for (int k = 1; k <= 6; ++k) {
+                            if (!can_enter(x + k * d, y)) break;
+                            if (can_enter(x + k * d, y + 1)) { if (k > 1) { nx = x + d; dir = (int8_t)d; } break; }
+                            if (!(c.in(x + k * d, y + 1) && c.raw(x + k * d, y + 1) == T_WATER)) break;
+                        }
+                    }
+                }
+            }
+            if (nx == x && ny == y) {
+                g.cell_dir[i] = 0;
+                if (kind == T_LAVA && g.cell_aux[i] == kAuxPoured && ++g.cell_timer[i] >= kLavaCoolTicks)
+                    c.put(x, y, T_BASALT);
+                continue;
+            }
+            uint8_t aux = kind == T_LAVA ? g.cell_aux[i] : 0;
+            c.put(x, y, T_EMPTY);
+            c.put(nx, ny, kind);
+            int j = c.idx(nx, ny);
+            g.cell_dir[j] = dir; g.cell_timer[j] = 0; g.cell_aux[j] = aux; moved[j] = 1;
+            g.cell_dir[i] = 0; g.cell_timer[i] = 0; g.cell_aux[i] = 0;
+        }
+    }
+}
 
 void ignite(Cells& c, int x, int y) {
     if (!c.in(x, y)) return;
@@ -192,41 +259,17 @@ void react_tick(GameState& s) {
         if (c.in(x, y) && liquid_can_enter(c.raw(x, y))) {
             c.put(x, y, T_LAVA);
             int i = c.idx(x, y);
-            g.cell_dir[i] = em.dir; g.cell_timer[i] = 0; moved[i] = 1;
+            g.cell_dir[i] = em.dir; g.cell_timer[i] = 0; g.cell_aux[i] = kAuxPoured; moved[i] = 1;
             --em.left;
         }
         if (em.left <= 0) g.emitters[k--] = g.emitters[--g.emitter_count];
     }
 
-    // Lava flow: fall if possible, else keep running in its direction,
-    // else pour over an edge; otherwise rest (and slowly cool).
-    bool ltr = (g.react_tick & 1) != 0;
-    for (int y = c.y0 + c.h - 1; y >= c.y0; --y) {
-        for (int k = 0; k < c.w; ++k) {
-            int x = ltr ? c.x0 + k : c.x0 + c.w - 1 - k;
-            int i = c.idx(x, y);
-            if (moved[i] || c.raw(x, y) != T_LAVA) continue;
-            int8_t dir = g.cell_dir[i];
-            int nx = x, ny = y;
-            if (c.in(x, y + 1) && liquid_can_enter(c.raw(x, y + 1))) ny = y + 1;
-            else if (dir && c.in(x + dir, y) && liquid_can_enter(c.raw(x + dir, y))) nx = x + dir;
-            else {
-                dir = 0;
-                for (int d = -1; d <= 1 && nx == x; d += 2)
-                    if (c.in(x + d, y) && liquid_can_enter(c.raw(x + d, y))
-                        && c.in(x + d, y + 1) && liquid_can_enter(c.raw(x + d, y + 1))) { nx = x + d; dir = (int8_t)d; }
-            }
-            if (nx == x && ny == y) {
-                g.cell_dir[i] = 0;
-                if (++g.cell_timer[i] >= kLavaCoolTicks) c.put(x, y, T_BASALT);
-                continue;
-            }
-            c.put(x, y, T_EMPTY);
-            c.put(nx, ny, T_LAVA);
-            int j = c.idx(nx, ny);
-            g.cell_dir[j] = dir; g.cell_timer[j] = 0; moved[j] = 1;
-            g.cell_dir[i] = 0; g.cell_timer[i] = 0;
-        }
+    // Liquids. Water moves twice per tick (it's runnier than lava).
+    flow_pass(s, c, T_LAVA, moved);
+    for (int pass = 0; pass < 2; ++pass) {
+        std::memset(moved, 0, (size_t)n);
+        flow_pass(s, c, T_WATER, moved);
     }
 
     // Reactions.
@@ -238,6 +281,9 @@ void react_tick(GameState& s) {
             if (t == T_LAVA) {
                 bool quenched = false;
                 for (auto& d : nb) if (tile_wet(s.world, x + d[0], y + d[1]) && c.in(x + d[0], y + d[1])) quenched = true;
+                // Ice: the lava hardens and the ice starts to thaw.
+                for (auto& d : nb)
+                    if (c.in(x + d[0], y + d[1]) && c.raw(x + d[0], y + d[1]) == T_ICE) { quenched = true; start_thaw(s, c, x + d[0], y + d[1]); }
                 if (quenched) {
                     c.put(x, y, T_BASALT);
                     for (int k = 0; k < 3; ++k)
@@ -249,6 +295,7 @@ void react_tick(GameState& s) {
             } else if (t == T_FIRE) {
                 bool doused = false;
                 for (auto& d : nb) if (tile_wet(s.world, x + d[0], y + d[1]) && c.in(x + d[0], y + d[1])) doused = true;
+                for (auto& d : nb) start_thaw(s, c, x + d[0], y + d[1]);
                 uint8_t burn = (uint8_t)burn_ticks(g.cell_aux[i]);
                 if (!doused && g.cell_timer[i] + 2 <= burn)
                     for (auto& d : nb) ignite(c, x + d[0], y + d[1]);
@@ -260,6 +307,15 @@ void react_tick(GameState& s) {
                     spawn_particle(g, x * kTile + 8.0f, y * kTile + 8.0f, frand_range(g, -10, 10), -30, 0.8f, 3,
                                    rgba(70, 70, 76, 180), -10, 1);
                     if (fuse && !doused) flag_set(s, f);
+                }
+            } else if (t == T_ICE && g.cell_timer[i] > 0) {
+                // Thawing: turns to water, and the thaw spreads to touching ice.
+                if (++g.cell_timer[i] >= kThawTicks + 1) {
+                    c.put(x, y, T_WATER);
+                    g.cell_timer[i] = 0; g.cell_dir[i] = 0; g.cell_aux[i] = 0;
+                    for (auto& d : nb) start_thaw(s, c, x + d[0], y + d[1]);
+                    spawn_particle(g, x * kTile + 8.0f, y * kTile + 8.0f, frand_range(g, -15, 15), frand_range(g, -40, -10),
+                                   0.5f, 2, rgba(210, 240, 255, 200), 120, 1);
                 }
             }
         }
@@ -468,6 +524,27 @@ void draw_switch(int tx, int ty) {
     wrect(kx, py + 3, 3, 3, on ? rgba(90, 230, 110) : rgba(230, 70, 70));
 }
 
+void draw_ice(int tx, int ty) {
+    float px = (float)(tx * kTile), py = (float)(ty * kTile);
+    const World& w = g_state->world;
+    wrect(px, py, kTile, kTile, rgba(150, 205, 235));
+    wrect(px + 1, py + 1, 14, 14, rgba(178, 224, 246));
+    // diagonal glints
+    for (int i = 0; i < 4; ++i) wrect(px + 3 + i, py + 9 - i, 1, 1, rgba(240, 250, 255));
+    wrect(px + 10, py + 4, 1, 1, rgba(240, 250, 255));
+    if (tile_get(w, tx, ty - 1) != T_ICE) wrect(px, py, kTile, 1, rgba(235, 248, 255));
+    // thawing: cracks + drips
+    const Play& g = g_state->play;
+    if (g.snap_valid && tx >= g.snap_x && ty >= g.snap_y && tx < g.snap_x + g.snap_w && ty < g.snap_y + g.snap_h) {
+        int tm = g.cell_timer[(ty - g.snap_y) * g.snap_w + (tx - g.snap_x)];
+        if (tm > 0) {
+            wrect(px + 4, py + 2, 1, 6, rgba(90, 140, 180));
+            wrect(px + 5, py + 7, 4, 1, rgba(90, 140, 180));
+            if (tm > 1) { wrect(px + 9, py + 7, 1, 6, rgba(90, 140, 180)); wrect(px + 7, py + 14, 2, 2, rgba(120, 180, 230)); }
+        }
+    }
+}
+
 void draw_react_tile(uint8_t t, int tx, int ty) {
     float time = react_time();
     switch (t) {
@@ -491,6 +568,7 @@ void draw_react_tile(uint8_t t, int tx, int ty) {
         }
         case T_FUSE:   draw_line_tile(tx, ty, T_FUSE, rgba(110, 80, 50), rgba(200, 160, 100), 2); break;
         case T_SWITCH: draw_switch(tx, ty); break;
+        case T_ICE:    draw_ice(tx, ty); break;
         default: break;
     }
 }

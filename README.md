@@ -125,8 +125,18 @@ A small simulation runs over the current room at 10 Hz, the same way every
 time, and resets when you die or leave:
 
 - **Lava** (`&`) falls, then runs in its flow direction, pours over edges,
-  and cools to **basalt** (`o`, solid) after resting for 3 s. Touching water
-  turns it to basalt straight away. It ignites anything flammable. Lethal.
+  and (if it was poured from a cauldron) cools to **basalt** (`o`, solid)
+  after resting for 3 s. Lava placed in the editor stays lava. Touching
+  water or ice turns it to basalt straight away. It ignites anything
+  flammable. Lethal.
+- **Water** (`w`) flows too: it falls, spreads sideways when there's water
+  piled above it, pours over edges, and levels out across the surface. A
+  full, closed pool stays perfectly still until something breaks it, e.g.
+  burn a wooden wall holding it back and it floods out. Moving water puts
+  out fire, quenches lava and carries electricity from live cables.
+- **Ice** (`I`): solid, slippery (low friction) and too slippery to climb.
+  Lava or fire touching it starts a thaw that spreads through the whole
+  connected block, and every ice tile becomes water, which then flows.
 - **Fire** burns through wood crates (`W`), wooden platforms, fuses, cables
   and plants, then leaves a gap. Water puts it out. Lethal.
 - **Cauldron** (`U`): push into it for a moment, or dash into it, to tip it
@@ -173,12 +183,14 @@ mushrooms, rubble, vines, chain, torch, pillar), and lair hazards:
 
 The starter world: the four grounds rooms plus the lair (Your Desk,
 Reception, The Shark Tank, Boiler Room, Server Farm, The Giga Laser, The
-Lab). **The Lab** (left of the Shark Tank) is a chain-reaction puzzle: tip
+Lab, The Walk-in Freezer). **The Lab** (left of the Shark Tank) is a chain-reaction puzzle: tip
 the cauldron, and the lava builds a basalt bridge over the electrified pit,
 burns the fuse and the barricade, and opens the way to the plan piece. The
 fuse turns on the lights in the Boiler Room, which is dark until then. The
 Boiler Room's main breaker (top right) switches off the Server Farm's rack
-lasers. Decorations aren't solid; in the
+lasers. Behind the Lab's alcove is **The Walk-in Freezer**: tip its cauldron
+onto the ice wall, the thaw spreads through it, and the meltwater floods
+the corridor and turns the lava strip in front of the plan piece to stone. Decorations aren't solid; in the
 editor reach them with Q / E (keys 1-0 cover the first ten brushes).
 
 ## Art

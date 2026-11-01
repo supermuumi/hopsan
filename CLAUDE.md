@@ -34,9 +34,11 @@ of `src/game/*`.
   fuses it's the flag they set. Flag changes rebuild the current room's
   entities and "peek" the camera at the most-affected other room. Rooms
   can be dark (`Room::dark`: 255 always, N until flag N). Reactions are a
-  10 Hz deterministic cellular sim over the current room (lava flow /
-  cooling / quench to basalt, fire spread, electrified water flood fill,
-  cauldron emitters). The room's tiles are snapshotted on build and
+  10 Hz deterministic cellular sim over the current room (lava + water
+  flow via `flow_pass`; poured lava cools, placed lava doesn't; quench to
+  basalt; ice thaw chain -> water; fire spread; electrified water flood
+  fill; cauldron emitters). Resting water never moves, so closed pools are
+  stable. Ice is solid, slippery and unclimbable. The room's tiles are snapshotted on build and
   restored on death / leaving / entering the editor / saving.
   Level-design rules: plan pieces must never be destroyable; every room
   must stay reachable for every reachable combination of holes + flags.

@@ -453,7 +453,7 @@ void draw_tile_static(const World& w, uint8_t t, int tx, int ty, float alpha_ent
             draw_hazard_static(*g_state, t, tx, ty);
             break;
         case T_SWITCH: case T_LAVA: case T_WOOD: case T_FIRE: case T_BASALT: case T_CAULDRON:
-        case T_CAULDRON_TIPPED: case T_CABLE: case T_FUSE:
+        case T_CAULDRON_TIPPED: case T_CABLE: case T_FUSE: case T_ICE:
             draw_react_tile(t, tx, ty);
             break;
         default:

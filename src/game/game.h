@@ -25,7 +25,7 @@ constexpr const char* kTag = "game";
 // Bump whenever GameState's layout changes so a hot reload re-initialises
 // instead of reading garbage.
 constexpr uint32_t kStateMagic   = 0x484F5053u; // 'HOPS'
-constexpr uint32_t kStateVersion = 10;
+constexpr uint32_t kStateVersion = 11;
 
 // ---- Units ---------------------------------------------------------------
 // World units are pixels of the virtual screen. One tile is kTile pixels.
@@ -90,6 +90,7 @@ enum Tile : uint8_t {
     T_CAULDRON_TIPPED,
     T_CABLE,         // live wire: lethal, electrifies water it touches, flammable
     T_FUSE,          // wick: burns fast; when it burns out it sets its flag (cond)
+    T_ICE,           // solid, slippery, unclimbable; heat thaws it into (flowing) water
     T_COUNT
 };
 
@@ -146,6 +147,7 @@ constexpr TileInfo kTileInfo[T_COUNT] = {
     { 'u', "tipped cauldron", rgba(40, 40, 46)   },
     { 'z', "live cable", rgba(250, 230, 90)      },
     { 'i', "fuse",       rgba(170, 130, 80)      },
+    { 'I', "ice",        rgba(170, 220, 245)     },
 };
 
 inline bool tile_is_spike(uint8_t t) { return t >= T_SPIKE_U && t <= T_SPIKE_R; }

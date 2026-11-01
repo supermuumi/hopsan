@@ -117,7 +117,7 @@ Entity* entity_at_tile(Play& g, uint8_t kind, int tx, int ty) {
 bool solid_at(GameState& s, int tx, int ty) {
     uint8_t t = tile_get(s.world, tx, ty);
     if (t == T_ROCK || t == T_BRICK || conveyor_dir(t) != 0 || tile_is_laser(t)) return true;
-    if (t == T_WOOD || t == T_BASALT || t == T_CAULDRON || t == T_CAULDRON_TIPPED) return true;
+    if (t == T_WOOD || t == T_BASALT || t == T_CAULDRON || t == T_CAULDRON_TIPPED || t == T_ICE) return true;
     if (t == T_CRUMBLE) {
         Entity* e = entity_at_tile(s.play, E_CRUMBLE, tx, ty);
         return !e || e->state != 2;
@@ -538,6 +538,25 @@ void trigger_crumbles_in_box(GameState& s, int x, int y, int w, int h) {
         }
 }
 
+// Is there a wall you can actually hold on to here? (Ice is too slippery.)
+bool climbable(GameState& s, int x, int y, int w, int h) {
+    int tx0 = floordiv(x, kTile), tx1 = floordiv(x + w - 1, kTile);
+    int ty0 = floordiv(y, kTile), ty1 = floordiv(y + h - 1, kTile);
+    for (int ty = ty0; ty <= ty1; ++ty)
+        for (int tx = tx0; tx <= tx1; ++tx)
+            if (solid_at(s, tx, ty) && tile_get(s.world, tx, ty) != T_ICE) return true;
+    return false;
+}
+
+// Standing on ice?
+bool on_ice(GameState& s) {
+    Player& p = s.play.p;
+    int ty = floordiv(p.y + kPlayerH, kTile);
+    for (int tx = floordiv(p.x, kTile); tx <= floordiv(p.x + kPlayerW - 1, kTile); ++tx)
+        if (tile_get(s.world, tx, ty) == T_ICE) return true;
+    return false;
+}
+
 void player_update(GameState& s, float dt) {
     Play& g = s.play;
     Player& p = g.p;
@@ -617,7 +636,7 @@ void player_update(GameState& s, float dt) {
     }
 
     case PS_CLIMB: {
-        bool wall = collide_tiles(s, p.x + p.facing, p.y, kPlayerW, kPlayerH);
+        bool wall = climbable(s, p.x + p.facing, p.y, kPlayerW, kPlayerH);
         if (!a.grab_held || p.stamina <= 0 || !wall) {
             p.state = PS_NORMAL;
             break;
@@ -675,7 +694,7 @@ void player_update(GameState& s, float dt) {
 
         // Grab a wall?
         if (a.grab_held && p.stamina > 0 && !(p.vy < 0 && p.var_jump_timer > 0)
-            && collide_tiles(s, p.x + p.facing, p.y, kPlayerW, kPlayerH)) {
+            && climbable(s, p.x + p.facing, p.y, kPlayerW, kPlayerH)) {
             p.state = PS_CLIMB;
             p.vx = 0;
             p.vy = 0;
@@ -683,6 +702,7 @@ void player_update(GameState& s, float dt) {
         }
 
         float mult = (p.on_ground || g.wall_style == WALL_HK) ? 1.0f : kAirMult;
+        if (p.on_ground && on_ice(s)) mult = 0.12f;   // slippery: slow to start, slow to stop
         float target = (float)mx * kMaxRun;
         if (std::fabs(p.vx) > kMaxRun && signf(p.vx) == (float)mx)
             p.vx = approach(p.vx, target, kRunReduce * mult * dt);
