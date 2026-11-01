@@ -84,8 +84,8 @@ void cmd_hole(int argc, const char** argv, void* user) {
         Play& g = s->play;
         g.hole = g.hole_target = clampi(std::atoi(argv[1]), 1, kHoles);
         s->world.gate_hole = g.hole;
-        g.hole_banner = 4.0f;
         build_entities(*s, g.room);
+        start_card(*s, CARD_HOLE);
     }
     logf(LOG_LEVEL_INFO, "hole %d (target %d)", s->play.hole, s->play.hole_target);
 }

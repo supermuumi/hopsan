@@ -80,6 +80,7 @@ void progress_reset(GameState& s) {
     g.star_count = g.pending_count = 0;
     g.hole = g.hole_target = 1;
     g.finale_seen = false;
+    g.card_kind = g.card_next = 0;
     progress_save(s);
 }
 

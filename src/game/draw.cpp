@@ -131,7 +131,7 @@ void text(float x, float y, uint32_t color, int font, const char* fmt, ...) {
 // Text with a 1px drop shadow, for readability over the world.
 void text_sh(float x, float y, uint32_t color, int font, const char* str) {
     float o = (float)g_ui;
-    text(x + o, y + o, rgba(0, 0, 0, 200), font, "%s", str);
+    text(x + o, y + o, rgba(0, 0, 0, (int)(200 * ((color >> 24) / 255.0f))), font, "%s", str);
     text(x, y, color, font, "%s", str);
 }
 

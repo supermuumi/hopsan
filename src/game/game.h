@@ -25,7 +25,7 @@ constexpr const char* kTag = "game";
 // Bump whenever GameState's layout changes so a hot reload re-initialises
 // instead of reading garbage.
 constexpr uint32_t kStateMagic   = 0x484F5053u; // 'HOPS'
-constexpr uint32_t kStateVersion = 8;
+constexpr uint32_t kStateVersion = 9;
 
 // ---- Units ---------------------------------------------------------------
 // World units are pixels of the virtual screen. One tile is kTile pixels.
@@ -267,6 +267,7 @@ struct Actions {
     bool grab_held;
     bool jump_latched;      // pressed since the last sim step
     bool dash_latched;
+    bool confirm_latched;   // Enter / Escape / any action button: for cards
 };
 
 // ---- Play mode -----------------------------------------------------------
@@ -312,9 +313,16 @@ struct Play {
     // or respawn, so tiles never change under your feet mid-room.
     int32_t  hole;
     int32_t  hole_target;
-    float    hole_banner;        // seconds left showing the boss's message
     bool     finale_seen;
-    float    finale_timer;
+
+    // Full-screen interstitial card (new hole / finale). The game is
+    // paused while one is up. card_t counts up from the card's start;
+    // card_exit_t >= 0 once it's been dismissed and is fading out.
+    uint8_t  card_kind;          // CardKind
+    uint8_t  card_next;          // queued card to show after this one
+    int32_t  card_hole;
+    float    card_t;
+    float    card_exit_t;
 
     float   cam_x, cam_y;     // top-left of the view, world px
     bool    transitioning;

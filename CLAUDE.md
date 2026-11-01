@@ -18,7 +18,9 @@ of `src/game/*`.
 - Golf-hole clock (`src/game/clock.cpp`): hole = 1 + committed pieces *
   17 / total, so the last piece is always hole 18 = he walks in (fixed
   finale; placeholder "THE END" overlay for now). A hole change applies on
-  the next room entry / respawn, never mid-room, with a boss message.
+  the next room entry / respawn, never mid-room, announced by a
+  full-screen card (`start_card` / `card_tick` / `draw_card`) that pauses
+  the sim; the finale card queues after the 18th-hole card.
   Tiles can be tagged "from hole N" / "until hole N" (per-chunk `from` /
   `until` arrays; `tile_get` hides tiles not present at `World::gate_hole`,
   `tile_raw` ignores tags; save file stores `hole x y from until` lines per

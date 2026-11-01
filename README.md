@@ -74,8 +74,11 @@ next to the engine binary; `progress_reset` in the console forgets it.
 The boss is playing 18 holes. Every plan piece you commit moves his round
 on; the last piece is always the 18th hole, when he walks back in. The
 HUD shows the current hole (top right). A new hole takes effect when you
-next enter a room or respawn, never mid-room, and comes with a message
-from the course.
+next enter a room or respawn, never mid-room. It's announced with a
+full-screen card that pauses the game: the course at dusk, "HOLE N"
+slamming in, and the boss's line typing out. Press jump (or Enter / Esc)
+once to finish the typing and again to continue; it also moves on by
+itself after 8 seconds. The final piece gets its own "HE'S BACK!" card.
 
 As the round goes on the lair gets more hectic: pulsing lasers cycle up to
 35% faster, drones and sharks speed up, and from hole 13 the alarm lights

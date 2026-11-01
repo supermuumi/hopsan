@@ -242,7 +242,7 @@ void play_start(GameState& s) {
     update_hole_target(s);
     g.hole = g.hole_target;
     s.world.gate_hole = g.hole;
-    g.hole_banner = 4.0f;
+    start_card(s, CARD_HOLE);
     int tx = 0, ty = 0, x = 0, y = 0, room = -1;
     if (find_start(s.world, &tx, &ty)) {
         tile_spawn_pos(tx, ty, &x, &y);
@@ -940,6 +940,9 @@ void sim_step(GameState& s) {
     Player& p = g.p;
     const float dt = kStep;
 
+    // A full-screen card pauses the game entirely.
+    if (g.card_kind != CARD_NONE) { card_tick(s, dt); return; }
+
     // Latched presses become buffers so a press is never lost.
     if (s.act.jump_latched) { p.jump_buffer = kJumpBufferTime; s.act.jump_latched = false; }
     if (s.act.dash_latched) { p.dash_buffer = kDashBufferTime; s.act.dash_latched = false; }
@@ -947,8 +950,6 @@ void sim_step(GameState& s) {
     g.time += dt;
     g.shake = fmaxf_(0, g.shake - dt);
     g.room_banner = fmaxf_(0, g.room_banner - dt);
-    g.hole_banner = fmaxf_(0, g.hole_banner - dt);
-    g.finale_timer = fmaxf_(0, g.finale_timer - dt);
     update_particles(g, dt);
 
     if (g.freeze > 0) { g.freeze -= dt; return; }
@@ -1027,6 +1028,10 @@ void gather_actions(GameState& s, const FrameInput& in) {
     a.grab_held = grab;
     if (jump_p) a.jump_latched = true;
     if (dash_p) a.dash_latched = true;
+    constexpr int SC_RETURN = 40, SC_ESC = 41;
+    if (jump_p || dash_p || kp[SC_RETURN] || kp[SC_ESC]
+        || (in.pad_connected && (in.pad_pressed[PAD_SOUTH] || in.pad_pressed[PAD_EAST])))
+        a.confirm_latched = true;
 }
 
 void play_tick(GameState& s, float dt) {
@@ -1219,6 +1224,10 @@ void render_play(GameState& s) {
     srect(0, (float)(oy + vh), (float)W, (float)(H - oy - vh), bar);
     srect(0, (float)oy, (float)ox, (float)vh, bar);
     srect((float)(ox + vw), (float)oy, (float)(W - ox - vw), (float)vh, bar);
+
+    // A card covers everything. (Text is always drawn above quads by the
+    // host, so the HUD has to be skipped rather than covered.)
+    if (g.card_kind != CARD_NONE) { draw_card(s, ox, oy, vw, vh); return; }
 
     // HUD.
     char buf[96];
